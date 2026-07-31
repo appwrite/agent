@@ -1,17 +1,22 @@
-# Thin Appwrite wrapper around the official OpenHands Agent Server.
-# Pin the base tag when promoting beyond POC.
-ARG BASE_IMAGE=ghcr.io/openhands/agent-server:latest-python
-FROM ${BASE_IMAGE}
+FROM mcr.microsoft.com/playwright/python:v1.54.0-jammy
 
-ENV OH_ENABLE_VNC=false \
-    LOG_JSON=true \
-    LC_ALL=C.UTF-8 \
-    LANG=C.UTF-8
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PORT=8000 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# Agent Server listens on 8000 inside the image.
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --upgrade pip \
+    && pip install -r requirements.txt
+
+COPY app ./app
+
 EXPOSE 8000
 
-# Persist conversation / workspace state outside the container FS when mounted.
-VOLUME ["/workspace"]
+HEALTHCHECK --interval=10s --timeout=5s --retries=6 --start-period=45s \
+  CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
 
-WORKDIR /workspace
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]

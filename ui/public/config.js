@@ -1,0 +1,1 @@
+window.ASSISTANT_API_KEY = window.ASSISTANT_API_KEY || "";

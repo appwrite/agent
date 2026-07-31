@@ -1,27 +1,39 @@
 services:
-  openhands:
+  assistant:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ${OPENHANDS_IMAGE:-ghcr.io/eldadfux/openhands:dev}
-    container_name: appwrite-openhands
+    image: ${ASSISTANT_IMAGE:-ghcr.io/eldadfux/openhands:dev}
+    container_name: appwrite-assistant
     ports:
-      - "${OPENHANDS_PORT:-8000}:8000"
+      - "${ASSISTANT_PORT:-8000}:8000"
     environment:
+      ASSISTANT_API_KEY: ${ASSISTANT_API_KEY:-}
       OH_SESSION_API_KEYS_0: ${OH_SESSION_API_KEYS_0:-}
-      OH_SECRET_KEY: ${OH_SECRET_KEY:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-openai/gpt-4o}
-    volumes:
-      - openhands-workspace:/workspace
-    # TCP check — base image may not ship curl.
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      GOOGLE_SEARCH_ENABLED: ${GOOGLE_SEARCH_ENABLED:-true}
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000'"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
       interval: 10s
       timeout: 5s
       retries: 6
-      start_period: 45s
+      start_period: 30s
     restart: unless-stopped
 
-volumes:
-  openhands-workspace:
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    image: ${ASSISTANT_UI_IMAGE:-ghcr.io/eldadfux/openhands-ui:dev}
+    container_name: appwrite-assistant-ui
+    ports:
+      - "${ASSISTANT_UI_PORT:-3001}:80"
+    environment:
+      ASSISTANT_API_KEY: ${ASSISTANT_API_KEY:-}
+      OH_SESSION_API_KEYS_0: ${OH_SESSION_API_KEYS_0:-}
+    depends_on:
+      assistant:
+        condition: service_healthy
+    restart: unless-stopped

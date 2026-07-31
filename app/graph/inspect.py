@@ -1,0 +1,98 @@
+"""Safe, non-secret snapshot of agent runtime settings for the UI."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from app.config import get_settings
+from app.graph.builder import (
+    MAX_HANDOFFS,
+    RESEARCHER_PROMPT,
+    SUPERVISOR_PROMPT,
+    WORKER_PROMPT,
+)
+from app.graph.browser import CACHE_TTL_S
+from app.graph.stream import SUBAGENT_RECURSION_LIMIT
+from app.graph.tools import build_tools
+
+HISTORY_WINDOW = 12
+BROWSER_FETCH_TIMEOUT_MS = 35_000
+BROWSER_FETCH_TEXT_LIMIT = 14_000
+LLM_TEMPERATURE = 0.2
+
+
+def agent_settings_snapshot() -> dict[str, Any]:
+    settings = get_settings()
+    tools = []
+    for t in build_tools():
+        tools.append(
+            {
+                "name": t.name,
+                "description": (t.description or "").strip(),
+            }
+        )
+
+    return {
+        "llm": {
+            "model": settings.llm_model,
+            "chat_model": settings.chat_model,
+            "base_url": settings.llm_base_url or None,
+            "api_key_configured": bool(settings.llm_api_key),
+            "temperature": LLM_TEMPERATURE,
+        },
+        "auth": {
+            "session_api_key_configured": bool(settings.session_api_key),
+            "header": "X-Session-API-Key",
+        },
+        "server": {
+            "host": settings.host,
+            "port": settings.port,
+        },
+        "browser_fetch": {
+            "enabled": True,
+            "domain_limits": "none (public https only; local/private hosts blocked)",
+            "timeout_ms": BROWSER_FETCH_TIMEOUT_MS,
+            "text_limit": BROWSER_FETCH_TEXT_LIMIT,
+            "cache_ttl_seconds": int(CACHE_TTL_S),
+            "engine": "playwright/chromium",
+        },
+        "google_search": {
+            "enabled": bool(settings.google_search_enabled),
+            "engine": "browser: Google → Bing → Brave (no API key)",
+            "api_key_required": False,
+        },
+        "runtime": {
+            "max_handoffs": MAX_HANDOFFS,
+            "subagent_recursion_limit": SUBAGENT_RECURSION_LIMIT,
+            "history_window": HISTORY_WINDOW,
+            "graph": "supervisor → researcher | worker → FINISH",
+        },
+        "tools": tools,
+        "agents": [
+            {
+                "name": "supervisor",
+                "role": "Routes work and produces the final user-facing answer",
+                "prompt": SUPERVISOR_PROMPT.strip(),
+            },
+            {
+                "name": "researcher",
+                "role": "Facts, calculation, Google search, browser fetch",
+                "prompt": RESEARCHER_PROMPT.strip(),
+            },
+            {
+                "name": "worker",
+                "role": "Plans, structured answers, sandbox_exec stub",
+                "prompt": WORKER_PROMPT.strip(),
+            },
+        ],
+        "env": {
+            "LLM_MODEL": settings.llm_model,
+            "LLM_BASE_URL": settings.llm_base_url or "",
+            "GOOGLE_SEARCH_ENABLED": "true" if settings.google_search_enabled else "false",
+            "HOST": settings.host,
+            "PORT": str(settings.port),
+            "LLM_API_KEY": "••••••" if settings.llm_api_key else "",
+            "ASSISTANT_API_KEY": "••••••" if settings.assistant_api_key else "",
+            "OH_SESSION_API_KEYS_0": "••••••" if settings.oh_session_api_keys_0 else "",
+        },
+    }
