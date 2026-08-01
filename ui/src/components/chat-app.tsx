@@ -866,14 +866,17 @@ export function ChatApp() {
 
         <SidebarInset className="flex h-svh min-h-0 flex-col overflow-hidden md:h-[calc(100svh-1rem)]">
           <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b px-4">
-            <div className="flex items-center gap-2">
-              <SidebarTrigger />
-              <Separator orientation="vertical" className="h-4" />
-              <div className="flex flex-col">
-                <span className="text-sm font-medium">
+            <div className="flex min-w-0 items-center gap-3">
+              <SidebarTrigger className="shrink-0" />
+              <Separator
+                orientation="vertical"
+                className="data-vertical:h-5 data-vertical:w-px data-vertical:self-center"
+              />
+              <div className="flex min-w-0 flex-col justify-center leading-tight">
+                <span className="truncate text-sm font-medium">
                   {conversationId ? "Conversation" : "New conversation"}
                 </span>
-                <span className="text-xs text-muted-foreground">
+                <span className="truncate text-xs text-muted-foreground">
                   Supervisor · appwrite · researcher · worker
                 </span>
               </div>
