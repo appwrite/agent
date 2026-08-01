@@ -9,11 +9,10 @@ services:
       - "${ASSISTANT_PORT:-8000}:8000"
     environment:
       ASSISTANT_API_KEY: ${ASSISTANT_API_KEY:-}
-      OH_SESSION_API_KEYS_0: ${OH_SESSION_API_KEYS_0:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-openai/gpt-4o}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
-      GOOGLE_SEARCH_ENABLED: ${GOOGLE_SEARCH_ENABLED:-true}
+      WEB_SEARCH_ENABLED: ${WEB_SEARCH_ENABLED:-true}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
       interval: 10s
@@ -32,7 +31,6 @@ services:
       - "${ASSISTANT_UI_PORT:-3001}:80"
     environment:
       ASSISTANT_API_KEY: ${ASSISTANT_API_KEY:-}
-      OH_SESSION_API_KEYS_0: ${OH_SESSION_API_KEYS_0:-}
     depends_on:
       assistant:
         condition: service_healthy

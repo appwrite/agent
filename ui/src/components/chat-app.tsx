@@ -148,26 +148,26 @@ function stampEvent(event: StreamEvent): StreamEvent {
 
 const SUGGESTIONS = [
   {
+    label: "Appwrite TypeScript auth",
+    prompt:
+      "Using the Appwrite TypeScript skill, show how to create an email/password session and get the current user.",
+    icon: SparklesIcon,
+  },
+  {
+    label: "Appwrite CLI deploy",
+    prompt:
+      "Using the Appwrite CLI skill, explain how to init a project and deploy a function non-interactively.",
+    icon: SearchIcon,
+  },
+  {
     label: "Latest BBC headlines",
     prompt: "What are the latest BBC news headlines? Open https://www.bbc.com/news in the browser.",
     icon: NewspaperIcon,
   },
   {
-    label: "Google search",
-    prompt:
-      "Use google_search to find recent coverage of the Scottish Premiership, then summarize the top results.",
-    icon: SearchIcon,
-  },
-  {
     label: "Quick calculation",
     prompt: "What is 17 × 19? Use the calculator tool.",
     icon: SquareFunctionIcon,
-  },
-  {
-    label: "Explain the architecture",
-    prompt:
-      "Explain how this LangGraph supervisor and researcher/worker setup works.",
-    icon: SparklesIcon,
   },
 ] as const
 
@@ -671,7 +671,7 @@ export function ChatApp() {
                   {conversationId ? "Conversation" : "New conversation"}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  Supervisor · researcher · worker
+                  Supervisor · appwrite · researcher · worker
                 </span>
               </div>
             </div>

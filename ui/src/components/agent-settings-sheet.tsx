@@ -46,11 +46,26 @@ function Row({
   children: ReactNode
 }) {
   return (
-    <div className="grid min-w-0 grid-cols-[7.5rem_minmax(0,1fr)] items-start gap-3 text-sm">
-      <dt className="text-muted-foreground">{label}</dt>
+    <div className="grid min-w-0 grid-cols-[minmax(0,11rem)_minmax(0,1fr)] items-start gap-3 text-sm">
+      <dt className="min-w-0 break-words text-muted-foreground [overflow-wrap:anywhere]">
+        {label}
+      </dt>
       <dd className="min-w-0 overflow-hidden break-all font-medium [overflow-wrap:anywhere]">
         {children}
       </dd>
+    </div>
+  )
+}
+
+function EnvRow({ name, value }: { name: string; value: string }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5 text-sm">
+      <span className="font-mono text-xs break-all text-muted-foreground">
+        {name}
+      </span>
+      <span className="min-w-0 break-all font-mono text-xs font-medium">
+        {value || <span className="text-muted-foreground">unset</span>}
+      </span>
     </div>
   )
 }
@@ -226,24 +241,46 @@ export function AgentSettingsSheet({
                   </Row>
                 </Section>
 
-                <Section title="Google search">
+                <Section title="Web search">
                   <Row label="Status">
                     <Badge
                       variant={
-                        settings.google_search?.enabled ? "secondary" : "outline"
+                        settings.web_search?.enabled ? "secondary" : "outline"
                       }
                     >
-                      {settings.google_search?.enabled ? "enabled" : "disabled"}
+                      {settings.web_search?.enabled ? "enabled" : "disabled"}
                     </Badge>
                   </Row>
                   <Row label="Engine">
-                    {settings.google_search?.engine || "—"}
+                    {settings.web_search?.engine || "—"}
                   </Row>
                   <Row label="API key">
-                    {settings.google_search?.api_key_required
+                    {settings.web_search?.api_key_required
                       ? "required"
                       : "not required"}
                   </Row>
+                </Section>
+
+                <Section title="Appwrite skills">
+                  <Row label="Installed">
+                    {settings.appwrite_skills?.count ?? 0}
+                  </Row>
+                  <Row label="Loader">
+                    <span className="font-mono text-xs">
+                      {settings.appwrite_skills?.loader_tool || "appwrite_skill"}
+                    </span>
+                  </Row>
+                  {(settings.appwrite_skills?.skills || []).map((skill) => (
+                    <div key={skill.name} className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
+                        <CheckIcon className="size-3.5 text-muted-foreground" />
+                        <span className="font-mono text-sm">{skill.name}</span>
+                      </div>
+                      <p className="pl-5 text-xs leading-relaxed text-muted-foreground">
+                        {skill.description}
+                      </p>
+                    </div>
+                  ))}
                 </Section>
 
                 <Section title="Tools">
@@ -290,13 +327,7 @@ export function AgentSettingsSheet({
 
                 <Section title="Environment">
                   {Object.entries(settings.env).map(([key, value]) => (
-                    <Row key={key} label={key}>
-                      <span className="font-mono text-xs font-normal">
-                        {value || (
-                          <span className="text-muted-foreground">unset</span>
-                        )}
-                      </span>
-                    </Row>
+                    <EnvRow key={key} name={key} value={value} />
                   ))}
                 </Section>
 

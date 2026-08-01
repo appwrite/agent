@@ -13,6 +13,7 @@ RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
 COPY app ./app
+COPY .agents ./.agents
 
 EXPOSE 8000
 

@@ -6,7 +6,7 @@ from app.config import get_settings
 async def require_session_key(
     x_session_api_key: str | None = Header(default=None, alias="X-Session-API-Key"),
 ) -> str:
-    expected = get_settings().session_api_key
+    expected = get_settings().assistant_api_key
     if not expected:
         # Local smoke only — production must set ASSISTANT_API_KEY.
         return ""

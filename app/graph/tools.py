@@ -13,7 +13,8 @@ from urllib.parse import urlparse
 from langchain_core.tools import tool
 
 from app.config import get_settings
-from app.graph.browser import browser_fetch_text, google_search_results, host_of
+from app.graph.browser import browser_fetch_text, host_of, web_search_results
+from app.graph.skills import load_skill, skill_index_text
 
 _OPS = {
     ast.Add: operator.add,
@@ -129,7 +130,7 @@ def browser_fetch(
 
 
 @tool
-def google_search(
+def web_search(
     query: Annotated[
         str,
         "Search query, e.g. 'Scottish Premiership Dundee United Rangers'",
@@ -139,51 +140,43 @@ def google_search(
         "How many organic results to return (1-10, default 8)",
     ] = 8,
 ) -> str:
-    """Search the web in a real browser — no Search API key.
+    """Search the open web in a real browser — no Search API key.
 
-    Opens Google like a normal user and reads result titles/URLs/snippets.
-    If Google serves a CAPTCHA (common on cloud IPs), falls back to Bing then
-    Brave in the same browser. Then browser_fetch promising result links.
+    Returns organic result titles, URLs, and snippets. Follow promising links
+    with browser_fetch when you need page content.
     """
     settings = get_settings()
-    if not settings.google_search_enabled:
+    if not settings.web_search_enabled:
         return (
-            "google_search is disabled. Set GOOGLE_SEARCH_ENABLED=true to enable "
-            "headless Google search."
+            "web_search is disabled. Set WEB_SEARCH_ENABLED=true to enable "
+            "headless web search."
         )
     q = " ".join((query or "").split())
     if not q:
         return "Error: query is empty"
     try:
-        data = google_search_results(q, max_results=max_results)
+        data = web_search_results(q, max_results=max_results)
     except Exception as exc:  # noqa: BLE001
-        return f"Error running Google search: {exc}"
+        return f"Error running web search: {exc}"
 
     results = data.get("results") or []
     if data.get("blocked") and not results:
         return (
-            f"status={data.get('status')} final_url={data.get('final_url')} "
-            f"source={data.get('source')}\n\n"
+            f"status={data.get('status')} count=0\n\n"
             "Search was blocked (bot/CAPTCHA). Try again later, or open a known "
             "URL with browser_fetch instead."
         )
 
     if not results:
         return (
-            f"status={data.get('status')} final_url={data.get('final_url')} "
-            f"source={data.get('source')}\n\n"
+            f"status={data.get('status')} count=0\n\n"
             "No organic results parsed from the results page."
         )
 
     lines = [
-        f"query={q!r} status={data.get('status')} "
-        f"source={data.get('source')} final_url={data.get('final_url')} "
-        f"count={len(results)}",
+        f"query={q!r} status={data.get('status')} count={len(results)}",
         "",
     ]
-    if data.get("note"):
-        lines.append(str(data["note"]))
-        lines.append("")
     for i, item in enumerate(results, 1):
         title = item.get("title") or "(no title)"
         url = item.get("url") or ""
@@ -194,6 +187,28 @@ def google_search(
             lines.append(f"   {snippet}")
         lines.append("")
     return "\n".join(lines).strip()
+
+
+@tool
+def appwrite_skill(
+    name: Annotated[
+        str,
+        "Appwrite skill to load. Use 'list' for the catalog, or a skill id such as "
+        "appwrite-typescript, appwrite-python, appwrite-cli, appwrite-dart, "
+        "appwrite-flutter (via dart), appwrite-go, appwrite-kotlin, appwrite-php, "
+        "appwrite-ruby, appwrite-rust, appwrite-swift, appwrite-dotnet. "
+        "Bare language names like 'typescript' or 'python' also work.",
+    ],
+) -> str:
+    """Load an installed Appwrite SDK/CLI skill guide (official agent-skills).
+
+    Call with name='list' first if unsure. Then load the matching language skill
+    before writing Appwrite code or CLI steps.
+    """
+    key = (name or "").strip()
+    if not key or key.lower() in {"list", "all", "skills"}:
+        return skill_index_text()
+    return load_skill(key)
 
 
 @tool
@@ -212,4 +227,23 @@ def sandbox_exec(
 
 
 def build_tools() -> list:
-    return [calculator, current_time, google_search, browser_fetch, sandbox_exec]
+    return [
+        calculator,
+        current_time,
+        web_search,
+        browser_fetch,
+        appwrite_skill,
+        sandbox_exec,
+    ]
+
+
+def build_appwrite_tools() -> list:
+    """Tools for the Appwrite expert (skills + docs fetch + light helpers)."""
+    return [
+        appwrite_skill,
+        browser_fetch,
+        web_search,
+        current_time,
+        calculator,
+        sandbox_exec,
+    ]

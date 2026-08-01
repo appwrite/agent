@@ -10,24 +10,23 @@ from langgraph.prebuilt import create_react_agent
 
 from app.config import get_settings
 from app.graph.builder import (
+    APPWRITE_EXPERT_PROMPT,
     RESEARCHER_PROMPT,
     SUPERVISOR_PROMPT,
     WORKER_PROMPT,
     Route,
     _last_ai_text,
     _make_llm,
+    _strip_tags,
 )
-from app.graph.tools import build_tools
+from app.graph.tools import build_appwrite_tools, build_tools
 
-# Enough for list page → article page → answer (without same-URL spam).
+# Enough for skill load → optional docs fetch → answer.
 SUBAGENT_RECURSION_LIMIT = 14
 
 
 def _strip_agent_prefix(text: str) -> str:
-    for prefix in ("[researcher] ", "[worker] "):
-        if text.startswith(prefix):
-            text = text[len(prefix) :]
-    return text
+    return _strip_tags(text)
 
 
 def _preview(value: Any, limit: int = 400) -> str:
@@ -163,9 +162,17 @@ async def stream_turn(
     """Run one user turn and yield stream events (caller owns persistence)."""
     llm = _make_llm(get_settings())
     tools = build_tools()
+    aw_tools = build_appwrite_tools()
     researcher = create_react_agent(llm, tools, prompt=RESEARCHER_PROMPT)
+    appwrite = create_react_agent(llm, aw_tools, prompt=APPWRITE_EXPERT_PROMPT)
     worker = create_react_agent(llm, tools, prompt=WORKER_PROMPT)
     supervisor_llm = llm.with_structured_output(Route)
+
+    agents = {
+        "researcher": researcher,
+        "appwrite": appwrite,
+        "worker": worker,
+    }
 
     messages: list[BaseMessage] = [
         *_history_messages(history),
@@ -173,7 +180,6 @@ async def stream_turn(
     ]
     handoffs = 0
     # At most one pass per subagent per turn — stops rewrite loops.
-    # Multi-step browsing happens inside the researcher ReAct loop.
     used_agents: set[str] = set()
 
     yield {"type": "status", "message": "Supervisor is routing…"}
@@ -187,8 +193,8 @@ async def stream_turn(
                     content=(
                         "A subagent already produced a result. "
                         "You MUST choose FINISH now and put the user-facing answer "
-                        "in final_answer. Do not route to researcher or worker again "
-                        "unless the prior result was clearly an error."
+                        "in final_answer. Do not route to researcher, appwrite, or "
+                        "worker again unless the prior result was clearly an error."
                     )
                 )
             )
@@ -207,6 +213,14 @@ async def stream_turn(
             return
 
         agent_name = route.next
+        if agent_name not in agents:
+            async for event in _finish_with_answer(
+                _last_ai_text(messages) or "Done.",
+                reason="unknown_agent",
+            ):
+                yield event
+            return
+
         if agent_name in used_agents:
             async for event in _finish_with_answer(
                 _last_ai_text(messages) or "Done.",
@@ -215,7 +229,7 @@ async def stream_turn(
                 yield event
             return
 
-        agent = researcher if agent_name == "researcher" else worker
+        agent = agents[agent_name]
         used_agents.add(agent_name)
         sub_content = ""
         async for event in _stream_subagent(agent, agent_name, messages):

@@ -6,14 +6,16 @@ from typing import Any
 
 from app.config import get_settings
 from app.graph.builder import (
+    APPWRITE_EXPERT_PROMPT,
     MAX_HANDOFFS,
     RESEARCHER_PROMPT,
     SUPERVISOR_PROMPT,
     WORKER_PROMPT,
 )
 from app.graph.browser import CACHE_TTL_S
+from app.graph.skills import list_skill_meta
 from app.graph.stream import SUBAGENT_RECURSION_LIMIT
-from app.graph.tools import build_tools
+from app.graph.tools import build_appwrite_tools, build_tools
 
 HISTORY_WINDOW = 12
 BROWSER_FETCH_TIMEOUT_MS = 35_000
@@ -32,6 +34,16 @@ def agent_settings_snapshot() -> dict[str, Any]:
             }
         )
 
+    aw_tools = [
+        {"name": t.name, "description": (t.description or "").strip()}
+        for t in build_appwrite_tools()
+    ]
+
+    skills = [
+        {"name": row["name"], "description": row["description"]}
+        for row in list_skill_meta()
+    ]
+
     return {
         "llm": {
             "model": settings.llm_model,
@@ -41,7 +53,7 @@ def agent_settings_snapshot() -> dict[str, Any]:
             "temperature": LLM_TEMPERATURE,
         },
         "auth": {
-            "session_api_key_configured": bool(settings.session_api_key),
+            "session_api_key_configured": bool(settings.assistant_api_key),
             "header": "X-Session-API-Key",
         },
         "server": {
@@ -56,18 +68,24 @@ def agent_settings_snapshot() -> dict[str, Any]:
             "cache_ttl_seconds": int(CACHE_TTL_S),
             "engine": "playwright/chromium",
         },
-        "google_search": {
-            "enabled": bool(settings.google_search_enabled),
-            "engine": "browser: Google → Bing → Brave (no API key)",
+        "web_search": {
+            "enabled": bool(settings.web_search_enabled),
+            "engine": "headless browser (no API key)",
             "api_key_required": False,
+        },
+        "appwrite_skills": {
+            "count": len(skills),
+            "skills": skills,
+            "loader_tool": "appwrite_skill",
         },
         "runtime": {
             "max_handoffs": MAX_HANDOFFS,
             "subagent_recursion_limit": SUBAGENT_RECURSION_LIMIT,
             "history_window": HISTORY_WINDOW,
-            "graph": "supervisor → researcher | worker → FINISH",
+            "graph": "supervisor → researcher | appwrite | worker → FINISH",
         },
         "tools": tools,
+        "appwrite_tools": aw_tools,
         "agents": [
             {
                 "name": "supervisor",
@@ -75,8 +93,13 @@ def agent_settings_snapshot() -> dict[str, Any]:
                 "prompt": SUPERVISOR_PROMPT.strip(),
             },
             {
+                "name": "appwrite",
+                "role": "Appwrite expert — SDKs, CLI, Cloud (loads installed skills)",
+                "prompt": APPWRITE_EXPERT_PROMPT.strip(),
+            },
+            {
                 "name": "researcher",
-                "role": "Facts, calculation, Google search, browser fetch",
+                "role": "Facts, calculation, web search, browser fetch",
                 "prompt": RESEARCHER_PROMPT.strip(),
             },
             {
@@ -88,11 +111,10 @@ def agent_settings_snapshot() -> dict[str, Any]:
         "env": {
             "LLM_MODEL": settings.llm_model,
             "LLM_BASE_URL": settings.llm_base_url or "",
-            "GOOGLE_SEARCH_ENABLED": "true" if settings.google_search_enabled else "false",
+            "WEB_SEARCH_ENABLED": "true" if settings.web_search_enabled else "false",
             "HOST": settings.host,
             "PORT": str(settings.port),
             "LLM_API_KEY": "••••••" if settings.llm_api_key else "",
             "ASSISTANT_API_KEY": "••••••" if settings.assistant_api_key else "",
-            "OH_SESSION_API_KEYS_0": "••••••" if settings.oh_session_api_keys_0 else "",
         },
     }

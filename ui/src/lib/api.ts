@@ -64,10 +64,15 @@ export type AgentSettings = {
     cache_ttl_seconds: number
     engine: string
   }
-  google_search: {
+  web_search: {
     enabled: boolean
     engine: string
     api_key_required: boolean
+  }
+  appwrite_skills?: {
+    count: number
+    skills: Array<{ name: string; description: string }>
+    loader_tool: string
   }
   runtime: {
     max_handoffs: number
@@ -76,6 +81,7 @@ export type AgentSettings = {
     graph: string
   }
   tools: Array<{ name: string; description: string }>
+  appwrite_tools?: Array<{ name: string; description: string }>
   agents: Array<{ name: string; role: string; prompt: string }>
   env: Record<string, string>
 }
@@ -184,7 +190,7 @@ export async function streamChat(
 export function ensureApiKey(): boolean {
   if (apiKey()) return true
   const key = window.prompt(
-    "Session API key (ASSISTANT_API_KEY / OH_SESSION_API_KEYS_0)"
+    "Session API key (ASSISTANT_API_KEY)"
   )
   if (!key) return false
   localStorage.setItem("assistant_api_key", key)
