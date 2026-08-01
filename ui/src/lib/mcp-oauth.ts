@@ -263,6 +263,21 @@ export async function beginMcpOAuth(
     resource,
   })
 
+  // Console OAuth2 only materializes project:/organization: API scopes when
+  // authorization_details binds them to resources (or `*`).
+  const scopes =
+    prm.scopes_supported && prm.scopes_supported.length > 0
+      ? prm.scopes_supported.join(" ")
+      : "openid profile email project:all organization:all"
+  params.set("scope", scopes)
+  params.set(
+    "authorization_details",
+    JSON.stringify([
+      { type: "project", identifiers: ["*"] },
+      { type: "organization", identifiers: ["*"] },
+    ])
+  )
+
   window.location.assign(
     `${asMeta.authorization_endpoint}?${params.toString()}`
   )

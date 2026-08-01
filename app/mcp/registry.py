@@ -59,8 +59,11 @@ def resolve_server(
             "id must be 2–64 chars, start with a letter, and use a-z, 0-9, _, -"
         )
     cleaned_url = (url or (builtin.url if builtin else "")).strip()
-    if not cleaned_url.startswith("https://"):
-        raise ValueError("url must be https://")
+    # https for hosted MCP; http for local compose (e.g. http://localhost:8100).
+    if not (
+        cleaned_url.startswith("https://") or cleaned_url.startswith("http://")
+    ):
+        raise ValueError("url must be http:// or https://")
     return McpServerDef(
         id=sid,
         name=(name or (builtin.name if builtin else sid)).strip(),
