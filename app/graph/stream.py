@@ -24,22 +24,23 @@ from app.graph.tools import build_appwrite_tools, build_tools
 from app.mcp import get_mcp_manager
 from app.turn_context import set_turn_attachments
 
-# Enough for skill load → optional docs fetch → answer.
-SUBAGENT_RECURSION_LIMIT = 14
+# MCP workflows often need search → call → retry; keep headroom above the
+# default react-agent budget so a few bad args do not end the turn early.
+SUBAGENT_RECURSION_LIMIT = 40
 
 
 def _strip_agent_prefix(text: str) -> str:
     return _strip_tags(text)
 
 
-def _preview(value: Any, limit: int = 400) -> str:
+def _preview(value: Any, limit: int) -> str:
     if value is None:
         return ""
     if hasattr(value, "content"):
         value = value.content
     text = value if isinstance(value, str) else str(value)
     text = text.strip()
-    if len(text) > limit:
+    if limit > 0 and len(text) > limit:
         return text[: limit - 1] + "…"
     return text
 
@@ -83,6 +84,10 @@ async def _stream_subagent(
     agent_name: str,
     messages: list,
 ) -> AsyncIterator[dict[str, Any]]:
+    settings = get_settings()
+    tool_input_limit = settings.stream_tool_input_chars
+    tool_output_limit = settings.stream_tool_output_chars
+
     yield {"type": "subagent_start", "agent": agent_name}
 
     last_text = ""
@@ -126,7 +131,7 @@ async def _stream_subagent(
                 "type": "tool_start",
                 "agent": agent_name,
                 "tool": name,
-                "input": _preview(data.get("input"), 240),
+                "input": _preview(data.get("input"), tool_input_limit),
             }
 
         elif kind == "on_tool_end":
@@ -134,7 +139,20 @@ async def _stream_subagent(
                 "type": "tool_end",
                 "agent": agent_name,
                 "tool": name,
-                "output": _preview(data.get("output")),
+                "output": _preview(data.get("output"), tool_output_limit),
+            }
+
+        elif kind == "on_tool_error":
+            # Unhandled tool exceptions skip on_tool_end; surface them so the
+            # UI/worker do not leave the call stuck in "running".
+            err = data.get("error")
+            detail = _preview(err, tool_output_limit) or "Tool execution failed"
+            yield {
+                "type": "tool_end",
+                "agent": agent_name,
+                "tool": name,
+                "output": f"Error: {detail}",
+                "failed": True,
             }
 
         elif kind == "on_chain_end" and name == "LangGraph":
@@ -151,7 +169,7 @@ async def _stream_subagent(
     yield {
         "type": "subagent_end",
         "agent": agent_name,
-        "summary": _preview(final, 280),
+        "summary": _preview(final, 2000),
         "tool_calls": tool_calls,
         "failed": _looks_like_failure(final),
     }

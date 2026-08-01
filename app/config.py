@@ -25,6 +25,17 @@ class Settings(BaseSettings):
         alias="ATTACHMENTS_MAX_PER_MESSAGE",
     )
 
+    # Caps on tool payloads emitted on the SSE stream (Cloud persists these).
+    # Keep below Cloud assistantTools resultText/resultJson size (1_000_000).
+    stream_tool_input_chars: int = Field(
+        default=100_000,
+        alias="STREAM_TOOL_INPUT_CHARS",
+    )
+    stream_tool_output_chars: int = Field(
+        default=500_000,
+        alias="STREAM_TOOL_OUTPUT_CHARS",
+    )
+
     host: str = Field(default="0.0.0.0", alias="HOST")
     port: int = Field(default=8000, alias="PORT")
 

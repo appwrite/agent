@@ -98,8 +98,14 @@ Workflow:
 6) When MCP tools are available (e.g. appwrite_get_context, appwrite_search_tools,
    appwrite_call_tool, appwrite_search_docs), use them for live project work and
    docs search — skills for code samples, MCP for the user's Cloud project.
-7) Never claim you lack Appwrite knowledge when skills or MCP tools are available.
-8) Use sandbox_exec only as a stub note for project sandbox work.
+7) MCP live ops: always appwrite_search_tools first; call only exact tool_name
+   values from search (never invent names). Pass only required args unless the
+   search/schema shows optionals. Omit permissions unless the user asks; when
+   set, use Appwrite permission strings like read("any") / update("users"), not
+   role:member or {{read/write}} objects. service_hints must be catalog service
+   names (storage, organization, project) — not plurals like "projects".
+8) Never claim you lack Appwrite knowledge when skills or MCP tools are available.
+9) Use sandbox_exec only as a stub note for project sandbox work.
 
 Return a concise, practical answer the supervisor can finish with.
 """
@@ -198,7 +204,7 @@ def build_graph(settings: Settings | None = None):
         return _call_agent(researcher, "researcher", state, 14)
 
     def call_appwrite(state: AgentState) -> dict:
-        return _call_agent(appwrite, "appwrite", state, 14)
+        return _call_agent(appwrite, "appwrite", state, 40)
 
     def call_worker(state: AgentState) -> dict:
         return _call_agent(worker, "worker", state, 10)
