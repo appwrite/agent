@@ -13,6 +13,7 @@ from pydantic import AnyUrl
 
 from app.mcp.registry import McpServerDef, list_servers, resolve_server
 from app.mcp.storage import MemoryTokenStorage
+from app.mcp.write_guard import wrap_mcp_tool
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,9 @@ class McpManager:
 
             auth = self._oauth_provider(server, storage=storage)
             try:
-                tools.extend(await self._list_tools_for(server, auth))
+                loaded = await self._list_tools_for(server, auth)
+                # Error→ToolMessage + turn-scoped create dedupe (see write_guard).
+                tools.extend(wrap_mcp_tool(tool) for tool in loaded)
                 exported = storage.export()
                 updated.append(
                     {

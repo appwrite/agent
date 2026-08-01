@@ -104,8 +104,14 @@ Workflow:
    set, use Appwrite permission strings like read("any") / update("users"), not
    role:member or {{read/write}} objects. service_hints must be catalog service
    names (storage, organization, project) — not plurals like "projects".
-8) Never claim you lack Appwrite knowledge when skills or MCP tools are available.
-9) Use sandbox_exec only as a stub note for project sandbox work.
+8) Mutating tools are not idempotent. Call each create at most once per request.
+   If the user did not give an id, use bucket_id/database_id=\"unique()\" as the
+   FIRST and only create (do not try slug ids like new_bucket first). Never fire
+   parallel writes. On already_exists / 409: stop — ignore tips to call unique()
+   again; list/get and report the existing resource as done. If a write returns
+   an unclear/empty error, list/get before any further create.
+9) Never claim you lack Appwrite knowledge when skills or MCP tools are available.
+10) Use sandbox_exec only as a stub note for project sandbox work.
 
 Return a concise, practical answer the supervisor can finish with.
 """

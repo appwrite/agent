@@ -22,6 +22,7 @@ from app.graph.builder import (
 )
 from app.graph.tools import build_appwrite_tools, build_tools
 from app.mcp import get_mcp_manager
+from app.mcp.write_guard import begin_turn_write_guard
 from app.turn_context import set_turn_attachments
 
 # MCP workflows often need search → call → retry; keep headroom above the
@@ -131,6 +132,7 @@ async def _stream_subagent(
                 "type": "tool_start",
                 "agent": agent_name,
                 "tool": name,
+                "run_id": event.get("run_id") or "",
                 "input": _preview(data.get("input"), tool_input_limit),
             }
 
@@ -139,6 +141,7 @@ async def _stream_subagent(
                 "type": "tool_end",
                 "agent": agent_name,
                 "tool": name,
+                "run_id": event.get("run_id") or "",
                 "output": _preview(data.get("output"), tool_output_limit),
             }
 
@@ -151,6 +154,7 @@ async def _stream_subagent(
                 "type": "tool_end",
                 "agent": agent_name,
                 "tool": name,
+                "run_id": event.get("run_id") or "",
                 "output": f"Error: {detail}",
                 "failed": True,
             }
@@ -188,6 +192,7 @@ async def run_turn_stream(
     llm = _make_llm(settings)
     normalized = normalize_attachments(attachments)
     set_turn_attachments(normalized)
+    begin_turn_write_guard()
 
     mcp = get_mcp_manager()
     mcp_tools, refreshed_creds = await mcp.tools_from_connections(mcp_connections)
