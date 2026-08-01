@@ -18,9 +18,15 @@ POC assistant engine for Appwrite Cloud `/v1/assistant`, built on [LangGraph](ht
 cp .env.example .env
 # set ASSISTANT_API_KEY and LLM_API_KEY
 
+# Stamp the image so /health and startup logs show which build is running
+export ASSISTANT_BUILD_ID="$(git rev-parse --short HEAD)"
+export ASSISTANT_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
 docker compose up --build -d
 
 curl -s http://127.0.0.1:8000/health
+# → {"status":"ok","build_id":"abc1234","build_time":"2026-08-01T17:56:00Z"}
+
 curl -sN -H "X-Session-API-Key: $ASSISTANT_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"message":"What is 17*19?","history":[]}' \
@@ -29,6 +35,21 @@ curl -sN -H "X-Session-API-Key: $ASSISTANT_API_KEY" \
 
 - API docs: http://127.0.0.1:8000/docs
 - UI: http://127.0.0.1:3001
+
+### Rebuild image only (tag used by cloud compose)
+
+```bash
+cd /path/to/eldadfux/openhands
+docker build \
+  --build-arg ASSISTANT_BUILD_ID="$(git rev-parse --short HEAD)" \
+  --build-arg ASSISTANT_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -t ghcr.io/eldadfux/openhands:dev \
+  .
+
+# Then recreate the cloud compose service that pulls that tag:
+# cd cloud && docker compose --profile assistant up -d --force-recreate appwrite-assistant
+# curl -s http://127.0.0.1:8000/health && docker logs appwrite-assistant 2>&1 | head -20
+```
 
 ## API
 

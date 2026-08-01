@@ -89,14 +89,18 @@ async def _stream_turn(body: TurnRequest) -> AsyncIterator[str]:
 
 @router.get("/health")
 async def health():
-    return {"status": "ok"}
+    from app.build_info import as_dict
+
+    return {"status": "ok", **as_dict()}
 
 
 @router.get("/ready")
 async def ready():
+    from app.build_info import as_dict
+
     settings = get_settings()
     ok = bool(settings.llm_api_key)
-    return {"ready": ok, "llm_configured": ok}
+    return {"ready": ok, "llm_configured": ok, **as_dict()}
 
 
 @router.get("/api/meta", dependencies=[Depends(require_session_key)])

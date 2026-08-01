@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        ASSISTANT_BUILD_ID: ${ASSISTANT_BUILD_ID:-local}
+        ASSISTANT_BUILD_TIME: ${ASSISTANT_BUILD_TIME:-unknown}
     image: ${ASSISTANT_IMAGE:-ghcr.io/eldadfux/openhands:dev}
     container_name: appwrite-assistant
     ports:
@@ -15,6 +18,8 @@ services:
       WEB_SEARCH_ENABLED: ${WEB_SEARCH_ENABLED:-true}
       MCP_OAUTH_REDIRECT_BASE: ${MCP_OAUTH_REDIRECT_BASE:-http://localhost:3001}
       MCP_OAUTH_CLIENT_NAME: ${MCP_OAUTH_CLIENT_NAME:-Appwrite Assistant}
+      ASSISTANT_BUILD_ID: ${ASSISTANT_BUILD_ID:-local}
+      ASSISTANT_BUILD_TIME: ${ASSISTANT_BUILD_TIME:-unknown}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
       interval: 10s
