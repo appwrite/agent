@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react"
 import {
   CheckIcon,
   CopyIcon,
+  Link2Icon,
   PlusIcon,
   RefreshCwIcon,
   Settings2Icon,
@@ -38,6 +39,7 @@ import {
   type AgentSettings,
   type McpServerStatus,
 } from "@/lib/api"
+import { connectMcpInPopup } from "@/lib/mcp-oauth"
 
 function Flag({ ok, label }: { ok: boolean; label: string }) {
   return (
@@ -117,6 +119,7 @@ export function AgentSettingsSheet({
   const [settings, setSettings] = useState<AgentSettings | null>(null)
   const [servers, setServers] = useState<McpServerStatus[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [showCreds, setShowCreds] = useState(false)
   const [newId, setNewId] = useState("")
@@ -158,9 +161,51 @@ export function AgentSettingsSheet({
     if (open) void load()
   }, [open])
 
+  useEffect(() => {
+    if (!open) return
+    // Same-tab OAuth fallback stores a one-shot result.
+    try {
+      const raw = localStorage.getItem("assistant_mcp_oauth_result")
+      if (!raw) return
+      localStorage.removeItem("assistant_mcp_oauth_result")
+      const data = JSON.parse(raw)
+      if (data?.status === "ok" && data.credentials) {
+        saveMcpConnection(data.credentials)
+        toast.success("MCP server connected")
+        void load()
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [open])
+
+  async function onConnect(server: McpServerStatus) {
+    setBusyId(server.id)
+    try {
+      toast.message("Complete sign-in in the popup…")
+      const credentials = await connectMcpInPopup({
+        id: server.id,
+        name: server.name,
+        url: server.url,
+        description: server.description,
+      })
+      saveMcpConnection(credentials)
+      toast.success("MCP server connected")
+      await load()
+    } catch (err) {
+      const msg = String((err as Error).message || err)
+      if (!msg.includes("popup closed")) {
+        toast.error(msg)
+      }
+      void load()
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   function onDisconnect(serverId: string) {
     disconnectMcpServer(serverId)
-    toast.success("Credentials cleared")
+    toast.success("Disconnected")
     refreshServers(settings)
   }
 
@@ -284,16 +329,11 @@ export function AgentSettingsSheet({
               <>
                 <Section title="Connections">
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    OAuth runs in your client/proxy. Paste credentials here for
-                    the POC — they are stored in this browser and sent as{" "}
+                    OAuth runs entirely in this browser (PKCE). Tokens stay in
+                    localStorage and are sent as{" "}
                     <span className="font-mono">mcp_connections</span> on every
                     chat turn. The engine never starts OAuth.
                   </p>
-                  {settings.mcp?.note ? (
-                    <p className="text-[11px] leading-relaxed text-muted-foreground">
-                      {settings.mcp.note}
-                    </p>
-                  ) : null}
                   {servers.map((server) => (
                     <div
                       key={server.id}
@@ -305,11 +345,11 @@ export function AgentSettingsSheet({
                             <span className="font-medium">{server.name}</span>
                             <Badge variant={statusVariant(server.status)}>
                               {server.status === "connected"
-                                ? "credentials set"
-                                : "no credentials"}
+                                ? "connected"
+                                : "disconnected"}
                             </Badge>
                             {server.builtin ? (
-                              <Badge variant="outline">suggested</Badge>
+                              <Badge variant="outline">built-in</Badge>
                             ) : null}
                           </div>
                           <p className="mt-0.5 text-xs break-all text-muted-foreground">
@@ -321,7 +361,7 @@ export function AgentSettingsSheet({
                             </p>
                           ) : null}
                         </div>
-                        <div className="flex shrink-0 gap-1.5">
+                        <div className="flex shrink-0 flex-col gap-1.5">
                           {server.status === "connected" ? (
                             <Button
                               size="sm"
@@ -329,20 +369,38 @@ export function AgentSettingsSheet({
                               onClick={() => onDisconnect(server.id)}
                             >
                               <UnplugIcon />
-                              Clear
+                              Disconnect
                             </Button>
                           ) : (
-                            <Button
-                              size="sm"
-                              onClick={() => openCreds(server)}
-                            >
-                              Paste tokens
-                            </Button>
+                            <>
+                              <Button
+                                size="sm"
+                                disabled={busyId === server.id}
+                                onClick={() => void onConnect(server)}
+                              >
+                                {busyId === server.id ? (
+                                  <Spinner />
+                                ) : (
+                                  <Link2Icon />
+                                )}
+                                Connect
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => openCreds(server)}
+                              >
+                                Paste tokens
+                              </Button>
+                            </>
                           )}
                         </div>
                       </div>
                     </div>
                   ))}
+                  <p className="text-[11px] break-all text-muted-foreground">
+                    OAuth redirect: {window.location.origin}/oauth/mcp/callback
+                  </p>
 
                   {showCreds ? (
                     <div className="flex flex-col gap-2 rounded-lg border px-3 py-2.5">

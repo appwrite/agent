@@ -1,4 +1,4 @@
-"""Remote MCP client — credentials supplied per turn; no OAuth or durable state."""
+"""Remote MCP client — credentials supplied per turn; no OAuth on the engine."""
 
 from __future__ import annotations
 
@@ -16,14 +16,13 @@ from app.mcp.storage import MemoryTokenStorage
 
 logger = logging.getLogger(__name__)
 
-# Placeholder redirect for the MCP OAuth client metadata when only using
-# pre-supplied tokens (refresh). Real OAuth is owned by the client/proxy.
+# Placeholder redirect for token-refresh auth metadata only (no browser OAuth here).
 _PLACEHOLDER_REDIRECT = "http://127.0.0.1/oauth/callback"
 
 
 class McpManager:
     def suggested_servers(self) -> list[dict[str, Any]]:
-        """Static built-in MCP URLs (hints only — no connection status)."""
+        """Static built-in MCP URLs (hints only — no connection state)."""
         return [
             {
                 "id": s.id,
@@ -44,13 +43,13 @@ class McpManager:
         async def _no_redirect(url: str) -> None:
             raise RuntimeError(
                 f"MCP server {server.id!r} needs re-authentication "
-                "(OAuth is handled by the client/proxy)."
+                "(complete OAuth in the client)."
             )
 
         async def _no_callback() -> tuple[str, str | None]:
             raise RuntimeError(
                 f"MCP server {server.id!r} needs re-authentication "
-                "(OAuth is handled by the client/proxy)."
+                "(complete OAuth in the client)."
             )
 
         return OAuthClientProvider(
@@ -83,11 +82,7 @@ class McpManager:
     async def tools_from_connections(
         self, connections: list[dict[str, Any]] | None
     ) -> tuple[list[BaseTool], list[dict[str, Any]]]:
-        """Build MCP tools from credentials supplied on the turn request.
-
-        Returns (tools, updated_credentials) so refreshed tokens can be persisted
-        by the caller/proxy.
-        """
+        """Build MCP tools from credentials supplied on the turn request."""
         tools: list[BaseTool] = []
         updated: list[dict[str, Any]] = []
         for conn in connections or []:

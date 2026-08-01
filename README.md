@@ -2,7 +2,7 @@
 
 POC assistant engine for Appwrite Cloud `/v1/assistant`, built on [LangGraph](https://github.com/langchain-ai/langgraph).
 
-**Stateless by design.** Cloud (or any proxy) owns conversation persistence, Realtime, auth, MCP OAuth/tokens, and attachments. This service is the agent runtime only — every turn receives the context it needs over the API. Cluster/compose-internal; never public.
+**Stateless by design.** Cloud (or any proxy) owns conversation persistence, Realtime, and auth. The UI/client owns MCP OAuth and credentials. This service is the agent runtime only — every turn receives the context it needs over the API.
 
 ## What you get
 
@@ -10,7 +10,7 @@ POC assistant engine for Appwrite Cloud `/v1/assistant`, built on [LangGraph](ht
 - **Appwrite expert** with official [agent-skills](https://github.com/appwrite/agent-skills) vendored under `.agents/skills/`
 - **Safe tools by default** — no host shell for the model
 - Tools: `calculator`, `current_time`, `web_search`, `browser_fetch`, `appwrite_skill`, `sandbox_exec` stub, plus MCP tools from credentials on the turn
-- FastAPI + shadcn chat UI (POC holds history/tokens in the browser)
+- FastAPI + shadcn chat UI
 
 ## Quick start
 
@@ -36,7 +36,7 @@ curl -sN -H "X-Session-API-Key: $ASSISTANT_API_KEY" \
 |--------|------|-------|
 | GET | `/health` | Liveness |
 | GET | `/ready` | LLM configured? |
-| GET | `/api/meta` | Auth — runtime inspection (suggested MCP URLs; no connection state) |
+| GET | `/api/meta` | Auth — runtime inspection |
 | POST | `/api/turn` | Auth — one turn (SSE) |
 
 ### Turn request
@@ -57,17 +57,25 @@ curl -sN -H "X-Session-API-Key: $ASSISTANT_API_KEY" \
       "name": "Appwrite",
       "url": "https://mcp.appwrite.io/",
       "tokens": { "access_token": "...", "refresh_token": "..." },
-      "client_info": {}
+      "client_info": { "client_id": "..." }
     }
   ]
 }
 ```
 
-SSE events include `route`, `subagent_*`, `tool_*`, `token`, `mcp_credentials` (refreshed tokens for the proxy), `done`, `complete`.
+SSE events include `route`, `subagent_*`, `tool_*`, `token`, `mcp_credentials` (refreshed tokens for the client to store), `done`, `complete`.
 
-## MCP
+## MCP OAuth (client-owned)
 
-OAuth is **not** handled by this engine. The client/proxy obtains tokens and passes the full server definition + credentials on every `/api/turn` as `mcp_connections`. Persist any `mcp_credentials` SSE events upstream.
+The engine does **not** run OAuth. The UI (or production proxy) does:
+
+1. Discover protected-resource + authorization-server metadata
+2. Dynamic client registration (public client + PKCE)
+3. Browser authorize → callback at `{origin}/oauth/mcp/callback`
+4. Store `tokens` + `client_info` in localStorage
+5. Send them on every `/api/turn` as `mcp_connections`
+
+Production Appwrite should own steps 1–4 and replay credentials on each turn the same way.
 
 ## Environment
 

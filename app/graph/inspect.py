@@ -81,8 +81,8 @@ def agent_settings_snapshot() -> dict[str, Any]:
         },
         "mcp": {
             "note": (
-                "OAuth is client/proxy-owned. Pass full server defs + tokens "
-                "on each POST /api/turn as mcp_connections."
+                "OAuth is handled entirely by the client. Pass mcp_connections "
+                "(url + tokens + client_info) on each POST /api/turn."
             ),
             "suggested_servers": get_mcp_manager().suggested_servers(),
         },

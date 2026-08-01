@@ -7,14 +7,14 @@ Shared long-running assistant engine for Cloud `/v1/assistant`. Cloud keeps HTTP
 - One shared service (`appwrite-assistant`) on port `8000`.
 - Auth via `ASSISTANT_API_KEY` → header `X-Session-API-Key`.
 - Local UI proxies `/api` to the engine (`:3001`). Not for Cloud ingress.
-- **Stateless:** conversations, attachments, and MCP tokens are supplied per `POST /api/turn`. No durable volumes. No MCP OAuth on the engine.
+- **Stateless:** conversations, attachments, and MCP tokens are supplied per `POST /api/turn`. No durable volumes. **No MCP OAuth on the engine.**
 - Supervisor routes to `appwrite` / `researcher` / `worker`.
 
 ## Proxy contract
 
 `POST /api/turn` with `history`, inline `attachments` (`content_base64`), and `mcp_connections` (full server URL + tokens + client_info). Persist refreshed credentials from `mcp_credentials` SSE events.
 
-`GET /api/meta` is optional inspection (suggested MCP URLs only).
+OAuth lives in the client/proxy. The POC UI implements browser PKCE at `/oauth/mcp/start` + `/oauth/mcp/callback`.
 
 ## Cloud ConfigMap keys (planned)
 
