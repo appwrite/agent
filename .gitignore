@@ -5,5 +5,6 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.data/
 ui/node_modules/
 ui/dist/

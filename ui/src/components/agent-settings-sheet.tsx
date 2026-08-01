@@ -2,8 +2,11 @@ import { useEffect, useState, type ReactNode } from "react"
 import {
   CheckIcon,
   CopyIcon,
+  Link2Icon,
+  PlusIcon,
   RefreshCwIcon,
   Settings2Icon,
+  UnplugIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -14,6 +17,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -25,9 +29,14 @@ import {
 } from "@/components/ui/sheet"
 import { Spinner } from "@/components/ui/spinner"
 import {
+  addMcpServer,
+  connectMcpServer,
+  disconnectMcpServer,
   ensureApiKey,
   fetchAgentSettings,
+  fetchMcpServers,
   type AgentSettings,
+  type McpServerStatus,
 } from "@/lib/api"
 
 function Flag({ ok, label }: { ok: boolean; label: string }) {
@@ -89,6 +98,14 @@ function Section({
   )
 }
 
+function statusVariant(
+  status: string
+): "secondary" | "outline" | "destructive" {
+  if (status === "connected") return "secondary"
+  if (status === "connecting") return "outline"
+  return "outline"
+}
+
 export function AgentSettingsSheet({
   open,
   onOpenChange,
@@ -98,14 +115,25 @@ export function AgentSettingsSheet({
 }) {
   const [loading, setLoading] = useState(false)
   const [settings, setSettings] = useState<AgentSettings | null>(null)
+  const [servers, setServers] = useState<McpServerStatus[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [showAdd, setShowAdd] = useState(false)
+  const [newId, setNewId] = useState("")
+  const [newName, setNewName] = useState("")
+  const [newUrl, setNewUrl] = useState("")
 
   async function load() {
     if (!ensureApiKey()) return
     setLoading(true)
     setError(null)
     try {
-      setSettings(await fetchAgentSettings())
+      const [nextSettings, nextServers] = await Promise.all([
+        fetchAgentSettings(),
+        fetchMcpServers(),
+      ])
+      setSettings(nextSettings)
+      setServers(nextServers)
     } catch (err) {
       setError(String((err as Error).message || err))
       setSettings(null)
@@ -117,6 +145,100 @@ export function AgentSettingsSheet({
   useEffect(() => {
     if (open) void load()
   }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    function onMessage(event: MessageEvent) {
+      const data = event.data
+      if (!data || data.type !== "mcp-oauth") return
+      if (data.status === "ok") {
+        toast.success("MCP server connected")
+        void load()
+      } else {
+        toast.error("MCP connection failed")
+        void load()
+      }
+    }
+    window.addEventListener("message", onMessage)
+    return () => window.removeEventListener("message", onMessage)
+  }, [open])
+
+  async function waitUntilConnected(serverId: string) {
+    const deadline = Date.now() + 120_000
+    while (Date.now() < deadline) {
+      const list = await fetchMcpServers()
+      setServers(list)
+      const row = list.find((s) => s.id === serverId)
+      if (row?.status === "connected") return true
+      if (row?.status === "disconnected") return false
+      await new Promise((r) => setTimeout(r, 1000))
+    }
+    return false
+  }
+
+  async function onConnect(serverId: string) {
+    setBusyId(serverId)
+    try {
+      const result = await connectMcpServer(serverId)
+      if (result.status === "connected" || !result.authorization_url) {
+        toast.success("MCP server connected")
+        await load()
+        return
+      }
+      const popup = window.open(
+        result.authorization_url,
+        "mcp-oauth",
+        "popup,width=520,height=720"
+      )
+      if (!popup) {
+        window.location.href = result.authorization_url
+        return
+      }
+      toast.message("Complete sign-in in the popup…")
+      const ok = await waitUntilConnected(serverId)
+      if (ok) toast.success("MCP server connected")
+      else toast.error("Still waiting — finish sign-in, then refresh")
+      await load()
+    } catch (err) {
+      toast.error(String((err as Error).message || err))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function onDisconnect(serverId: string) {
+    setBusyId(serverId)
+    try {
+      await disconnectMcpServer(serverId)
+      toast.success("Disconnected")
+      await load()
+    } catch (err) {
+      toast.error(String((err as Error).message || err))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function onAddServer() {
+    setBusyId("__add__")
+    try {
+      await addMcpServer({
+        id: newId.trim(),
+        name: newName.trim() || newId.trim(),
+        url: newUrl.trim(),
+      })
+      setShowAdd(false)
+      setNewId("")
+      setNewName("")
+      setNewUrl("")
+      toast.success("MCP server added")
+      await load()
+    } catch (err) {
+      toast.error(String((err as Error).message || err))
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   function copyJson() {
     if (!settings) return
@@ -175,6 +297,139 @@ export function AgentSettingsSheet({
 
             {settings ? (
               <>
+                <Section title="Connections">
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Connect remote MCP servers over OAuth. Appwrite is built in;
+                    you can add other HTTPS MCP servers the same way.
+                  </p>
+                  {(servers.length
+                    ? servers
+                    : settings.mcp?.servers || []
+                  ).map((server) => (
+                    <div
+                      key={server.id}
+                      className="flex min-w-0 flex-col gap-2 rounded-lg border px-3 py-2.5"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium">{server.name}</span>
+                            <Badge variant={statusVariant(server.status)}>
+                              {server.status}
+                            </Badge>
+                            {server.builtin ? (
+                              <Badge variant="outline">built-in</Badge>
+                            ) : null}
+                          </div>
+                          <p className="mt-0.5 text-xs break-all text-muted-foreground">
+                            {server.url}
+                          </p>
+                          {server.description ? (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {server.description}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="flex shrink-0 gap-1.5">
+                          {server.status === "connected" ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busyId === server.id}
+                              onClick={() => void onDisconnect(server.id)}
+                            >
+                              {busyId === server.id ? (
+                                <Spinner />
+                              ) : (
+                                <UnplugIcon />
+                              )}
+                              Disconnect
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              disabled={busyId === server.id}
+                              onClick={() => void onConnect(server.id)}
+                            >
+                              {busyId === server.id ? (
+                                <Spinner />
+                              ) : (
+                                <Link2Icon />
+                              )}
+                              Connect
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                      {server.tools?.length ? (
+                        <div className="flex flex-wrap gap-1">
+                          {server.tools.map((tool) => (
+                            <Badge
+                              key={tool}
+                              variant="outline"
+                              className="font-mono text-[10px]"
+                            >
+                              {tool}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+
+                  {showAdd ? (
+                    <div className="flex flex-col gap-2 rounded-lg border px-3 py-2.5">
+                      <Input
+                        placeholder="id (e.g. docs)"
+                        value={newId}
+                        onChange={(e) => setNewId(e.target.value)}
+                      />
+                      <Input
+                        placeholder="Display name"
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                      />
+                      <Input
+                        placeholder="https://… MCP URL"
+                        value={newUrl}
+                        onChange={(e) => setNewUrl(e.target.value)}
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          disabled={busyId === "__add__" || !newId || !newUrl}
+                          onClick={() => void onAddServer()}
+                        >
+                          {busyId === "__add__" ? <Spinner /> : <PlusIcon />}
+                          Save
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setShowAdd(false)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShowAdd(true)}
+                    >
+                      <PlusIcon />
+                      Add MCP server
+                    </Button>
+                  )}
+
+                  {settings.mcp?.redirect_uri ? (
+                    <p className="text-[11px] break-all text-muted-foreground">
+                      OAuth redirect: {settings.mcp.redirect_uri}
+                    </p>
+                  ) : null}
+                </Section>
+
                 <Section title="LLM">
                   <Row label="Model">{settings.llm.model}</Row>
                   <Row label="Chat model">{settings.llm.chat_model}</Row>

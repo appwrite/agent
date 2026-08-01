@@ -20,6 +20,7 @@ from app.graph.builder import (
     _strip_tags,
 )
 from app.graph.tools import build_appwrite_tools, build_tools
+from app.mcp import get_mcp_manager
 
 # Enough for skill load → optional docs fetch → answer.
 SUBAGENT_RECURSION_LIMIT = 14
@@ -161,8 +162,9 @@ async def stream_turn(
 ) -> AsyncIterator[dict[str, Any]]:
     """Run one user turn and yield stream events (caller owns persistence)."""
     llm = _make_llm(get_settings())
-    tools = build_tools()
-    aw_tools = build_appwrite_tools()
+    mcp_tools = await get_mcp_manager().get_connected_tools()
+    tools = [*build_tools(), *mcp_tools]
+    aw_tools = [*build_appwrite_tools(), *mcp_tools]
     researcher = create_react_agent(llm, tools, prompt=RESEARCHER_PROMPT)
     appwrite = create_react_agent(llm, aw_tools, prompt=APPWRITE_EXPERT_PROMPT)
     worker = create_react_agent(llm, tools, prompt=WORKER_PROMPT)

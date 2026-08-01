@@ -46,6 +46,8 @@ curl -s -H "X-Session-API-Key: $ASSISTANT_API_KEY" \
 | `LLM_MODEL` | no | Default `openai/gpt-4o` (also accepts bare `gpt-4o`) |
 | `LLM_BASE_URL` | no | Optional OpenAI-compatible base URL |
 | `WEB_SEARCH_ENABLED` | no | Headless browser web search (default `true`) |
+| `MCP_OAUTH_REDIRECT_BASE` | no | Browser origin for OAuth callback (default `http://localhost:3001`) |
+| `MCP_DATA_DIR` | no | Where OAuth tokens are stored (default `.data/mcp` / `/data/mcp` in Docker) |
 | `ASSISTANT_UI_PORT` | no | Host port for UI (default `3001`) |
 
 ## API (POC)
@@ -54,6 +56,12 @@ curl -s -H "X-Session-API-Key: $ASSISTANT_API_KEY" \
 |--------|------|-------|
 | GET | `/health` | Liveness |
 | GET | `/ready` | LLM configured? |
+| GET | `/api/settings` | Auth — runtime inspection |
+| GET | `/api/mcp/servers` | Auth — MCP connection status |
+| POST | `/api/mcp/servers` | Auth — add custom MCP server |
+| POST | `/api/mcp/servers/{id}/connect` | Auth — start OAuth; returns `authorization_url` |
+| POST | `/api/mcp/servers/{id}/disconnect` | Auth — drop tokens |
+| GET | `/api/mcp/oauth/callback` | OAuth redirect (no session header; `state` guarded) |
 | GET | `/api/conversations/count` | Auth |
 | GET | `/api/conversations` | Auth |
 | POST | `/api/conversations` | `{ "message": "..." }` — create + run |
@@ -70,6 +78,26 @@ SSE event types include `route`, `subagent_start` / `subagent_end`, `tool_start`
 - The model **cannot** run host shell commands. Outbound browsing via `web_search` / `browser_fetch` (Playwright; public https only).
 - `sandbox_exec` is a stub — Cloud should execute code only inside per-project Function sandboxes.
 - Unauthenticated mode (empty API key) is for local smoke tests only.
+
+## MCP connections (OAuth)
+
+The assistant can connect to remote MCP servers over Streamable HTTP + OAuth 2.1
+(PKCE), including the hosted Appwrite MCP at `https://mcp.appwrite.io/`.
+
+1. Open the UI → Agent settings → **Connections**
+2. Click **Connect** on Appwrite (or add another HTTPS MCP URL)
+3. Complete the browser OAuth consent
+4. Connected tools are available to agents on the next chat turn
+
+Set the browser-facing origin used for the OAuth redirect:
+
+```bash
+MCP_OAUTH_REDIRECT_BASE=http://localhost:3001
+```
+
+Callback URL: `{MCP_OAUTH_REDIRECT_BASE}/api/mcp/oauth/callback`
+
+Tokens are stored under `MCP_DATA_DIR` (Docker volume `assistant-mcp-data` by default).
 
 ## Appwrite skills
 

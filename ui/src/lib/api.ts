@@ -74,6 +74,11 @@ export type AgentSettings = {
     skills: Array<{ name: string; description: string }>
     loader_tool: string
   }
+  mcp?: {
+    oauth_redirect_base: string
+    redirect_uri: string
+    servers: McpServerStatus[]
+  }
   runtime: {
     max_handoffs: number
     subagent_recursion_limit: number
@@ -109,22 +114,78 @@ export async function fetchReady(): Promise<{ ready: boolean }> {
   return res.json()
 }
 
-export async function fetchAgentSettings(): Promise<AgentSettings> {
+export type McpServerStatus = {
+  id: string
+  name: string
+  url: string
+  description: string
+  builtin: boolean
+  status: "connected" | "connecting" | "disconnected" | string
+  tools: string[]
+}
+
+function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = {}
   const key = apiKey()
   if (key) headers["X-Session-API-Key"] = key
-  const res = await fetch("/api/settings", { headers })
-  if (!res.ok) {
-    const text = await res.text()
-    let detail = text
-    try {
-      detail = JSON.parse(text).detail || text
-    } catch {
-      /* keep */
-    }
-    throw new Error(detail || res.statusText)
+  return headers
+}
+
+async function readError(res: Response): Promise<string> {
+  const text = await res.text()
+  try {
+    return JSON.parse(text).detail || text || res.statusText
+  } catch {
+    return text || res.statusText
   }
+}
+
+export async function fetchAgentSettings(): Promise<AgentSettings> {
+  const res = await fetch("/api/settings", { headers: authHeaders() })
+  if (!res.ok) throw new Error(await readError(res))
   return res.json()
+}
+
+export async function fetchMcpServers(): Promise<McpServerStatus[]> {
+  const res = await fetch("/api/mcp/servers", { headers: authHeaders() })
+  if (!res.ok) throw new Error(await readError(res))
+  const data = await res.json()
+  return data.servers || []
+}
+
+export async function connectMcpServer(
+  serverId: string
+): Promise<{ authorization_url: string; status?: string }> {
+  const res = await fetch(`/api/mcp/servers/${encodeURIComponent(serverId)}/connect`, {
+    method: "POST",
+    headers: authHeaders(),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function disconnectMcpServer(serverId: string): Promise<void> {
+  const res = await fetch(
+    `/api/mcp/servers/${encodeURIComponent(serverId)}/disconnect`,
+    { method: "POST", headers: authHeaders() }
+  )
+  if (!res.ok) throw new Error(await readError(res))
+}
+
+export async function addMcpServer(input: {
+  id: string
+  name: string
+  url: string
+  description?: string
+}): Promise<McpServerStatus> {
+  const res = await fetch("/api/mcp/servers", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  const data = await res.json()
+  return data.server
 }
 
 export async function streamChat(

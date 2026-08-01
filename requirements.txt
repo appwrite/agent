@@ -8,3 +8,6 @@ langchain-openai==0.3.28
 langchain-core==0.3.72
 playwright==1.54.0
 python-dotenv==1.1.1
+mcp==1.12.4
+langchain-mcp-adapters==0.1.9
+httpx==0.28.1

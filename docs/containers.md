@@ -7,8 +7,9 @@ Shared long-running assistant engine for Cloud `/v1/assistant`. Cloud keeps HTTP
 - One shared service (`appwrite-assistant`) on port `8000`.
 - Auth via `ASSISTANT_API_KEY` → header `X-Session-API-Key`.
 - Local UI (`appwrite-assistant-ui` on `:3001`) proxies `/api` to the engine. Not for Cloud ingress.
-- **No host shell.** Tools: calculator, current_time, `web_search`, `browser_fetch` (Playwright; public https), and `sandbox_exec` stub (Function MCP later).
+- **No host shell.** Tools: calculator, current_time, `web_search`, `browser_fetch` (Playwright; public https), `sandbox_exec` stub, plus tools from connected remote MCP servers (OAuth).
 - Supervisor routes to `appwrite` / `researcher` / `worker` subagents (LangGraph).
+- Built-in MCP: Appwrite remote server `https://mcp.appwrite.io/` (OAuth; tokens under `MCP_DATA_DIR`).
 
 ## Cloud ConfigMap keys (planned)
 

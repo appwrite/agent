@@ -160,6 +160,12 @@ const SUGGESTIONS = [
     icon: SearchIcon,
   },
   {
+    label: "My Appwrite context",
+    prompt:
+      "If Appwrite MCP is connected, call appwrite_get_context and summarize my account, orgs, and projects.",
+    icon: SparklesIcon,
+  },
+  {
     label: "Latest BBC headlines",
     prompt: "What are the latest BBC news headlines? Open https://www.bbc.com/news in the browser.",
     icon: NewspaperIcon,

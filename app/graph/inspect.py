@@ -16,6 +16,7 @@ from app.graph.browser import CACHE_TTL_S
 from app.graph.skills import list_skill_meta
 from app.graph.stream import SUBAGENT_RECURSION_LIMIT
 from app.graph.tools import build_appwrite_tools, build_tools
+from app.mcp import get_mcp_manager
 
 HISTORY_WINDOW = 12
 BROWSER_FETCH_TIMEOUT_MS = 35_000
@@ -78,6 +79,11 @@ def agent_settings_snapshot() -> dict[str, Any]:
             "skills": skills,
             "loader_tool": "appwrite_skill",
         },
+        "mcp": {
+            "oauth_redirect_base": settings.mcp_oauth_redirect_base,
+            "redirect_uri": get_mcp_manager().redirect_uri(),
+            "servers": get_mcp_manager().status_snapshot(),
+        },
         "runtime": {
             "max_handoffs": MAX_HANDOFFS,
             "subagent_recursion_limit": SUBAGENT_RECURSION_LIMIT,
@@ -112,6 +118,7 @@ def agent_settings_snapshot() -> dict[str, Any]:
             "LLM_MODEL": settings.llm_model,
             "LLM_BASE_URL": settings.llm_base_url or "",
             "WEB_SEARCH_ENABLED": "true" if settings.web_search_enabled else "false",
+            "MCP_OAUTH_REDIRECT_BASE": settings.mcp_oauth_redirect_base,
             "HOST": settings.host,
             "PORT": str(settings.port),
             "LLM_API_KEY": "••••••" if settings.llm_api_key else "",
