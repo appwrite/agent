@@ -1,4 +1,4 @@
-"""Async turn runner that emits UI-friendly stream events."""
+"""Async turn runner that emits UI-friendly stream events (stateless)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
 
+from app.attachments import build_human_content, normalize_attachments
 from app.config import get_settings
 from app.graph.builder import (
     APPWRITE_EXPERT_PROMPT,
@@ -21,6 +22,7 @@ from app.graph.builder import (
 )
 from app.graph.tools import build_appwrite_tools, build_tools
 from app.mcp import get_mcp_manager
+from app.turn_context import set_turn_attachments
 
 # Enough for skill load → optional docs fetch → answer.
 SUBAGENT_RECURSION_LIMIT = 14
@@ -59,16 +61,19 @@ def _looks_like_failure(text: str) -> bool:
     return any(lowered.startswith(p) for p in failure_prefixes)
 
 
-def _history_messages(history: Sequence[dict[str, str]] | None) -> list[BaseMessage]:
+def _history_messages(history: Sequence[dict[str, Any]] | None) -> list[BaseMessage]:
+    """Build LangChain messages from client/proxy-supplied prior turns (text only)."""
     msgs: list[BaseMessage] = []
     for item in history or []:
         role = (item.get("role") or "").lower()
         content = (item.get("content") or "").strip()
-        if not content:
-            continue
         if role == "user":
+            if not content:
+                continue
             msgs.append(HumanMessage(content=content))
         elif role == "assistant":
+            if not content:
+                continue
             msgs.append(AIMessage(content=content))
     return msgs
 
@@ -94,38 +99,34 @@ async def _stream_subagent(
         name = event.get("name") or ""
         data = event.get("data") or {}
 
-        if kind == "on_chat_model_start":
-            current_text = ""
-            streaming_answer = False
-            yield {"type": "model_start", "agent": agent_name}
-
-        elif kind == "on_chat_model_stream":
+        if kind == "on_chat_model_stream":
             chunk = data.get("chunk")
-            content = getattr(chunk, "content", None) if chunk is not None else None
-            if isinstance(content, str) and content:
+            piece = getattr(chunk, "content", None) if chunk is not None else None
+            if isinstance(piece, list):
+                piece = "".join(
+                    p.get("text", "") if isinstance(p, dict) else str(p) for p in piece
+                )
+            if isinstance(piece, str) and piece:
                 if not streaming_answer:
                     streaming_answer = True
                     yield {"type": "answer_start", "agent": agent_name}
-                current_text += content
-                yield {"type": "token", "agent": agent_name, "content": content}
-
-        elif kind == "on_chat_model_end":
-            output = data.get("output")
-            calls = getattr(output, "tool_calls", None) or []
-            content = getattr(output, "content", "") if output is not None else ""
-            if isinstance(content, str) and content and not calls:
-                last_text = content
-            # Tool-bound turns are not the user-facing answer — clear the draft.
-            if calls:
-                yield {"type": "answer_reset", "agent": agent_name}
+                current_text += piece
+                yield {
+                    "type": "token",
+                    "agent": agent_name,
+                    "content": piece,
+                }
 
         elif kind == "on_tool_start":
             tool_calls += 1
+            if streaming_answer:
+                streaming_answer = False
+                current_text = ""
             yield {
                 "type": "tool_start",
                 "agent": agent_name,
                 "tool": name,
-                "input": _preview(data.get("input"), 600),
+                "input": _preview(data.get("input"), 240),
             }
 
         elif kind == "on_tool_end":
@@ -133,134 +134,138 @@ async def _stream_subagent(
                 "type": "tool_end",
                 "agent": agent_name,
                 "tool": name,
-                "output": _preview(data.get("output"), 800),
+                "output": _preview(data.get("output")),
             }
 
-    final = last_text or current_text
+        elif kind == "on_chain_end" and name == "LangGraph":
+            output = data.get("output") or {}
+            messages_out = output.get("messages") if isinstance(output, dict) else None
+            if messages_out:
+                last_text = _strip_agent_prefix(_last_ai_text(messages_out))
+
+    final = _strip_agent_prefix(last_text or current_text)
+    if final and not streaming_answer:
+        yield {"type": "answer_start", "agent": agent_name}
+        yield {"type": "token", "agent": agent_name, "content": final}
+
     yield {
         "type": "subagent_end",
         "agent": agent_name,
-        "content": final,
+        "summary": _preview(final, 280),
         "tool_calls": tool_calls,
+        "failed": _looks_like_failure(final),
     }
+    yield {"type": "final", "agent": agent_name, "content": final}
 
 
-async def _finish_with_answer(
-    answer: str,
+async def run_turn_stream(
     *,
-    reason: str,
-) -> AsyncIterator[dict[str, Any]]:
-    clean = _strip_agent_prefix(answer).strip() or "Done."
-    yield {"type": "route", "next": "FINISH", "reason": reason}
-    # Final answer is authoritative — do not soft-stream a second rewrite.
-    yield {"type": "done", "answer": clean}
-
-
-async def stream_turn(
     message: str,
-    history: Sequence[dict[str, str]] | None = None,
+    history: Sequence[dict[str, Any]] | None = None,
+    attachments: Sequence[dict[str, Any]] | None = None,
+    mcp_connections: Sequence[dict[str, Any]] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
-    """Run one user turn and yield stream events (caller owns persistence)."""
-    llm = _make_llm(get_settings())
-    mcp_tools = await get_mcp_manager().get_connected_tools()
-    tools = [*build_tools(), *mcp_tools]
-    aw_tools = [*build_appwrite_tools(), *mcp_tools]
-    researcher = create_react_agent(llm, tools, prompt=RESEARCHER_PROMPT)
-    appwrite = create_react_agent(llm, aw_tools, prompt=APPWRITE_EXPERT_PROMPT)
-    worker = create_react_agent(llm, tools, prompt=WORKER_PROMPT)
-    supervisor_llm = llm.with_structured_output(Route)
+    """Run one agent turn. All conversation / MCP / file context comes from the request."""
+    settings = get_settings()
+    llm = _make_llm(settings)
+    normalized = normalize_attachments(attachments)
+    set_turn_attachments(normalized)
 
-    agents = {
-        "researcher": researcher,
-        "appwrite": appwrite,
-        "worker": worker,
+    mcp = get_mcp_manager()
+    mcp_tools, refreshed_creds = await mcp.tools_from_connections(mcp_connections)
+    if refreshed_creds:
+        yield {
+            "type": "mcp_credentials",
+            "credentials": refreshed_creds,
+        }
+
+    tools = [*build_tools(), *mcp_tools]
+    appwrite_tools = [*build_appwrite_tools(), *mcp_tools]
+
+    router = llm.with_structured_output(Route)
+    researcher = create_react_agent(llm, tools=tools, prompt=RESEARCHER_PROMPT)
+    worker = create_react_agent(llm, tools=tools, prompt=WORKER_PROMPT)
+    appwrite = create_react_agent(llm, tools=appwrite_tools, prompt=APPWRITE_EXPERT_PROMPT)
+
+    prior = _history_messages(history)
+    human = HumanMessage(content=build_human_content(message, normalized))
+    conversation = [*prior, human]
+
+    yield {"type": "status", "message": "Routing request…"}
+    decision = await router.ainvoke(
+        [
+            SystemMessage(content=SUPERVISOR_PROMPT),
+            *conversation,
+        ]
+    )
+    next_agent = decision.next
+    reason = (decision.reason or "").strip() or f"Routed to {next_agent}"
+    yield {
+        "type": "route",
+        "agent": next_agent,
+        "next": next_agent,
+        "reason": reason,
     }
 
-    messages: list[BaseMessage] = [
-        *_history_messages(history),
-        HumanMessage(content=message),
-    ]
-    handoffs = 0
-    # At most one pass per subagent per turn — stops rewrite loops.
-    used_agents: set[str] = set()
+    # Direct finish (e.g. trivial follow-up) — no subagent needed.
+    if next_agent == "FINISH":
+        final_text = _strip_agent_prefix((decision.final_answer or "").strip())
+        if final_text:
+            yield {"type": "answer_start", "agent": "supervisor"}
+            yield {"type": "token", "agent": "supervisor", "content": final_text}
+        yield {"type": "done", "content": final_text, "answer": final_text}
+        return
 
-    yield {"type": "status", "message": "Supervisor is routing…"}
+    agent_map = {
+        "researcher": researcher,
+        "worker": worker,
+        "appwrite": appwrite,
+    }
+    agent = agent_map.get(next_agent)
+    if agent is None:
+        yield {
+            "type": "error",
+            "detail": f"Unknown route {next_agent!r}",
+        }
+        return
 
-    while True:
-        yield {"type": "subagent_start", "agent": "supervisor"}
-        msgs = [SystemMessage(content=SUPERVISOR_PROMPT), *messages]
-        if handoffs > 0:
-            msgs.append(
-                SystemMessage(
-                    content=(
-                        "A subagent already produced a result. "
-                        "You MUST choose FINISH now and put the user-facing answer "
-                        "in final_answer. Do not route to researcher, appwrite, or "
-                        "worker again unless the prior result was clearly an error."
-                    )
-                )
-            )
-        route: Route = await supervisor_llm.ainvoke(msgs)
+    messages = [SystemMessage(content=f"Task focus: {reason}"), *conversation]
+
+    final_text = ""
+    async for event in _stream_subagent(agent, next_agent, messages):
+        if event.get("type") == "final":
+            final_text = str(event.get("content") or "")
+            continue
+        yield event
+
+    if (
+        next_agent in {"researcher", "appwrite"}
+        and final_text
+        and _looks_like_failure(final_text)
+    ):
+        yield {
+            "type": "status",
+            "message": "Primary agent stalled — falling back to worker…",
+        }
         yield {
             "type": "route",
-            "next": route.next,
-            "agent": "supervisor",
+            "agent": "worker",
+            "next": "worker",
+            "reason": f"Fallback after {next_agent} could not complete the task",
         }
-        yield {"type": "subagent_end", "agent": "supervisor"}
-
-        if route.next == "FINISH":
-            answer = route.final_answer or _last_ai_text(messages) or "Done."
-            async for event in _finish_with_answer(answer, reason="supervisor_finish"):
-                yield event
-            return
-
-        agent_name = route.next
-        if agent_name not in agents:
-            async for event in _finish_with_answer(
-                _last_ai_text(messages) or "Done.",
-                reason="unknown_agent",
-            ):
-                yield event
-            return
-
-        if agent_name in used_agents:
-            async for event in _finish_with_answer(
-                _last_ai_text(messages) or "Done.",
-                reason="duplicate_handoff_blocked",
-            ):
-                yield event
-            return
-
-        agent = agents[agent_name]
-        used_agents.add(agent_name)
-        sub_content = ""
-        async for event in _stream_subagent(agent, agent_name, messages):
-            if event["type"] == "subagent_end":
-                sub_content = event.get("content") or ""
+        fallback_messages = [
+            SystemMessage(
+                content=(
+                    f"The {next_agent} agent failed with:\n{final_text}\n\n"
+                    "Complete the user's request with the tools you have."
+                )
+            ),
+            *conversation,
+        ]
+        async for event in _stream_subagent(worker, "worker", fallback_messages):
+            if event.get("type") == "final":
+                final_text = str(event.get("content") or "")
+                continue
             yield event
 
-        messages.append(AIMessage(content=f"[{agent_name}] {sub_content}"))
-        handoffs += 1
-        yield {"type": "status", "message": "Back to supervisor…"}
-
-        if sub_content and not _looks_like_failure(sub_content):
-            polish_msgs = [
-                SystemMessage(content=SUPERVISOR_PROMPT),
-                *messages,
-                SystemMessage(
-                    content=(
-                        "The subagent succeeded. Choose FINISH and rewrite their "
-                        "result into a clean final_answer for the user. "
-                        "Do not invent facts beyond the subagent result."
-                    )
-                ),
-            ]
-            polish: Route = await supervisor_llm.ainvoke(polish_msgs)
-            answer = (
-                polish.final_answer
-                if polish.next == "FINISH" and polish.final_answer.strip()
-                else sub_content
-            )
-            async for event in _finish_with_answer(answer, reason="subagent_complete"):
-                yield event
-            return
+    yield {"type": "done", "content": final_text, "answer": final_text}

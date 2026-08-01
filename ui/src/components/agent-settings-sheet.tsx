@@ -2,7 +2,6 @@ import { useEffect, useState, type ReactNode } from "react"
 import {
   CheckIcon,
   CopyIcon,
-  Link2Icon,
   PlusIcon,
   RefreshCwIcon,
   Settings2Icon,
@@ -28,13 +27,14 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Spinner } from "@/components/ui/spinner"
+import { Textarea } from "@/components/ui/textarea"
 import {
   addMcpServer,
-  connectMcpServer,
   disconnectMcpServer,
   ensureApiKey,
-  fetchAgentSettings,
-  fetchMcpServers,
+  fetchMeta,
+  listLocalMcpServers,
+  saveMcpConnection,
   type AgentSettings,
   type McpServerStatus,
 } from "@/lib/api"
@@ -117,23 +117,35 @@ export function AgentSettingsSheet({
   const [settings, setSettings] = useState<AgentSettings | null>(null)
   const [servers, setServers] = useState<McpServerStatus[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [busyId, setBusyId] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
+  const [showCreds, setShowCreds] = useState(false)
   const [newId, setNewId] = useState("")
   const [newName, setNewName] = useState("")
   const [newUrl, setNewUrl] = useState("")
+  const [credsJson, setCredsJson] = useState("")
+  const [credsServerId, setCredsServerId] = useState<string | null>(null)
+
+  function refreshServers(meta: AgentSettings | null) {
+    const suggested =
+      meta?.mcp?.suggested_servers ||
+      (meta?.mcp?.servers || []).map((s) => ({
+        id: s.id,
+        name: s.name,
+        url: s.url,
+        description: s.description,
+        builtin: s.builtin,
+      }))
+    setServers(listLocalMcpServers(suggested))
+  }
 
   async function load() {
     if (!ensureApiKey()) return
     setLoading(true)
     setError(null)
     try {
-      const [nextSettings, nextServers] = await Promise.all([
-        fetchAgentSettings(),
-        fetchMcpServers(),
-      ])
-      setSettings(nextSettings)
-      setServers(nextServers)
+      const next = await fetchMeta()
+      setSettings(next)
+      refreshServers(next)
     } catch (err) {
       setError(String((err as Error).message || err))
       setSettings(null)
@@ -146,83 +158,15 @@ export function AgentSettingsSheet({
     if (open) void load()
   }, [open])
 
-  useEffect(() => {
-    if (!open) return
-    function onMessage(event: MessageEvent) {
-      const data = event.data
-      if (!data || data.type !== "mcp-oauth") return
-      if (data.status === "ok") {
-        toast.success("MCP server connected")
-        void load()
-      } else {
-        toast.error("MCP connection failed")
-        void load()
-      }
-    }
-    window.addEventListener("message", onMessage)
-    return () => window.removeEventListener("message", onMessage)
-  }, [open])
-
-  async function waitUntilConnected(serverId: string) {
-    const deadline = Date.now() + 120_000
-    while (Date.now() < deadline) {
-      const list = await fetchMcpServers()
-      setServers(list)
-      const row = list.find((s) => s.id === serverId)
-      if (row?.status === "connected") return true
-      if (row?.status === "disconnected") return false
-      await new Promise((r) => setTimeout(r, 1000))
-    }
-    return false
+  function onDisconnect(serverId: string) {
+    disconnectMcpServer(serverId)
+    toast.success("Credentials cleared")
+    refreshServers(settings)
   }
 
-  async function onConnect(serverId: string) {
-    setBusyId(serverId)
+  function onAddServer() {
     try {
-      const result = await connectMcpServer(serverId)
-      if (result.status === "connected" || !result.authorization_url) {
-        toast.success("MCP server connected")
-        await load()
-        return
-      }
-      const popup = window.open(
-        result.authorization_url,
-        "mcp-oauth",
-        "popup,width=520,height=720"
-      )
-      if (!popup) {
-        window.location.href = result.authorization_url
-        return
-      }
-      toast.message("Complete sign-in in the popup…")
-      const ok = await waitUntilConnected(serverId)
-      if (ok) toast.success("MCP server connected")
-      else toast.error("Still waiting — finish sign-in, then refresh")
-      await load()
-    } catch (err) {
-      toast.error(String((err as Error).message || err))
-    } finally {
-      setBusyId(null)
-    }
-  }
-
-  async function onDisconnect(serverId: string) {
-    setBusyId(serverId)
-    try {
-      await disconnectMcpServer(serverId)
-      toast.success("Disconnected")
-      await load()
-    } catch (err) {
-      toast.error(String((err as Error).message || err))
-    } finally {
-      setBusyId(null)
-    }
-  }
-
-  async function onAddServer() {
-    setBusyId("__add__")
-    try {
-      await addMcpServer({
+      addMcpServer({
         id: newId.trim(),
         name: newName.trim() || newId.trim(),
         url: newUrl.trim(),
@@ -231,12 +175,53 @@ export function AgentSettingsSheet({
       setNewId("")
       setNewName("")
       setNewUrl("")
-      toast.success("MCP server added")
-      await load()
+      toast.success("MCP server added (saved in this browser)")
+      refreshServers(settings)
     } catch (err) {
       toast.error(String((err as Error).message || err))
-    } finally {
-      setBusyId(null)
+    }
+  }
+
+  function openCreds(server: McpServerStatus) {
+    setCredsServerId(server.id)
+    setCredsJson(
+      JSON.stringify(
+        {
+          id: server.id,
+          name: server.name,
+          url: server.url,
+          description: server.description,
+          tokens: { access_token: "", refresh_token: "" },
+          client_info: {},
+        },
+        null,
+        2
+      )
+    )
+    setShowCreds(true)
+  }
+
+  function saveCreds() {
+    try {
+      const parsed = JSON.parse(credsJson)
+      if (!parsed?.id || !parsed?.tokens?.access_token) {
+        throw new Error("JSON needs id and tokens.access_token")
+      }
+      const server = servers.find((s) => s.id === (credsServerId || parsed.id))
+      saveMcpConnection({
+        id: parsed.id,
+        name: parsed.name || server?.name,
+        url: parsed.url || server?.url,
+        description: parsed.description || server?.description || "",
+        tokens: parsed.tokens,
+        client_info: parsed.client_info,
+      })
+      setShowCreds(false)
+      setCredsServerId(null)
+      toast.success("Credentials saved — sent on each chat turn")
+      refreshServers(settings)
+    } catch (err) {
+      toast.error(String((err as Error).message || err))
     }
   }
 
@@ -299,13 +284,17 @@ export function AgentSettingsSheet({
               <>
                 <Section title="Connections">
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    Connect remote MCP servers over OAuth. Appwrite is built in;
-                    you can add other HTTPS MCP servers the same way.
+                    OAuth runs in your client/proxy. Paste credentials here for
+                    the POC — they are stored in this browser and sent as{" "}
+                    <span className="font-mono">mcp_connections</span> on every
+                    chat turn. The engine never starts OAuth.
                   </p>
-                  {(servers.length
-                    ? servers
-                    : settings.mcp?.servers || []
-                  ).map((server) => (
+                  {settings.mcp?.note ? (
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      {settings.mcp.note}
+                    </p>
+                  ) : null}
+                  {servers.map((server) => (
                     <div
                       key={server.id}
                       className="flex min-w-0 flex-col gap-2 rounded-lg border px-3 py-2.5"
@@ -315,10 +304,12 @@ export function AgentSettingsSheet({
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-medium">{server.name}</span>
                             <Badge variant={statusVariant(server.status)}>
-                              {server.status}
+                              {server.status === "connected"
+                                ? "credentials set"
+                                : "no credentials"}
                             </Badge>
                             {server.builtin ? (
-                              <Badge variant="outline">built-in</Badge>
+                              <Badge variant="outline">suggested</Badge>
                             ) : null}
                           </div>
                           <p className="mt-0.5 text-xs break-all text-muted-foreground">
@@ -335,47 +326,51 @@ export function AgentSettingsSheet({
                             <Button
                               size="sm"
                               variant="outline"
-                              disabled={busyId === server.id}
-                              onClick={() => void onDisconnect(server.id)}
+                              onClick={() => onDisconnect(server.id)}
                             >
-                              {busyId === server.id ? (
-                                <Spinner />
-                              ) : (
-                                <UnplugIcon />
-                              )}
-                              Disconnect
+                              <UnplugIcon />
+                              Clear
                             </Button>
                           ) : (
                             <Button
                               size="sm"
-                              disabled={busyId === server.id}
-                              onClick={() => void onConnect(server.id)}
+                              onClick={() => openCreds(server)}
                             >
-                              {busyId === server.id ? (
-                                <Spinner />
-                              ) : (
-                                <Link2Icon />
-                              )}
-                              Connect
+                              Paste tokens
                             </Button>
                           )}
                         </div>
                       </div>
-                      {server.tools?.length ? (
-                        <div className="flex flex-wrap gap-1">
-                          {server.tools.map((tool) => (
-                            <Badge
-                              key={tool}
-                              variant="outline"
-                              className="font-mono text-[10px]"
-                            >
-                              {tool}
-                            </Badge>
-                          ))}
-                        </div>
-                      ) : null}
                     </div>
                   ))}
+
+                  {showCreds ? (
+                    <div className="flex flex-col gap-2 rounded-lg border px-3 py-2.5">
+                      <p className="text-xs text-muted-foreground">
+                        Paste MCP connection JSON (id, url, tokens, client_info).
+                      </p>
+                      <Textarea
+                        value={credsJson}
+                        onChange={(e) => setCredsJson(e.target.value)}
+                        className="min-h-40 font-mono text-xs"
+                      />
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={() => saveCreds()}>
+                          Save credentials
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setShowCreds(false)
+                            setCredsServerId(null)
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {showAdd ? (
                     <div className="flex flex-col gap-2 rounded-lg border px-3 py-2.5">
@@ -397,10 +392,10 @@ export function AgentSettingsSheet({
                       <div className="flex gap-2">
                         <Button
                           size="sm"
-                          disabled={busyId === "__add__" || !newId || !newUrl}
-                          onClick={() => void onAddServer()}
+                          disabled={!newId || !newUrl}
+                          onClick={() => onAddServer()}
                         >
-                          {busyId === "__add__" ? <Spinner /> : <PlusIcon />}
+                          <PlusIcon />
                           Save
                         </Button>
                         <Button
@@ -422,12 +417,6 @@ export function AgentSettingsSheet({
                       Add MCP server
                     </Button>
                   )}
-
-                  {settings.mcp?.redirect_uri ? (
-                    <p className="text-[11px] break-all text-muted-foreground">
-                      OAuth redirect: {settings.mcp.redirect_uri}
-                    </p>
-                  ) : null}
                 </Section>
 
                 <Section title="LLM">

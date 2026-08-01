@@ -29,6 +29,10 @@ class AgentState(TypedDict):
 
 class Route(BaseModel):
     next: Literal["researcher", "appwrite", "worker", "FINISH"]
+    reason: str = Field(
+        default="",
+        description="One short sentence explaining why this agent (or FINISH) was chosen.",
+    )
     final_answer: str = Field(
         default="",
         description="Required when next is FINISH: the complete answer for the user.",

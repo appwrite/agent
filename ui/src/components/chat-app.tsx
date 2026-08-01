@@ -1,11 +1,16 @@
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import {
+  ArrowDownIcon,
   BotIcon,
   BracesIcon,
   CheckIcon,
   CopyIcon,
   CornerDownLeftIcon,
+  FileIcon,
+  FileTextIcon,
+  ImageIcon,
   NewspaperIcon,
+  PaperclipIcon,
   PlusIcon,
   RouteIcon,
   SearchIcon,
@@ -13,13 +18,17 @@ import {
   SquareFunctionIcon,
   UserIcon,
   WrenchIcon,
+  XIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import {
   Attachment,
+  AttachmentAction,
+  AttachmentActions,
   AttachmentContent,
   AttachmentDescription,
+  AttachmentGroup,
   AttachmentMedia,
   AttachmentTitle,
 } from "@/components/ui/attachment"
@@ -94,9 +103,12 @@ import {
 import { Markdown } from "@/components/markdown"
 import { MessageMetadataSheet } from "@/components/message-metadata-sheet"
 import {
+  encodeAttachment,
   ensureApiKey,
   fetchReady,
   streamChat,
+  type ChatAttachment,
+  type HistoryMessage,
   type MessageMeta,
   type StreamEvent,
 } from "@/lib/api"
@@ -110,8 +122,20 @@ type ToolActivity = {
   state: "processing" | "done" | "error"
 }
 
+type PendingAttachment = ChatAttachment & {
+  localId: string
+  state: "uploading" | "done" | "error"
+  error?: string
+}
+
 type ChatItem =
-  | { id: string; role: "user"; content: string; meta: MessageMeta }
+  | {
+      id: string
+      role: "user"
+      content: string
+      attachments: ChatAttachment[]
+      meta: MessageMeta
+    }
   | {
       id: string
       role: "assistant"
@@ -122,6 +146,68 @@ type ChatItem =
       tools: ToolActivity[]
       meta: MessageMeta
     }
+
+function formatBytes(size: number) {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function FileChip({
+  file,
+  onRemove,
+}: {
+  file: {
+    name: string
+    mime: string
+    size: number
+    kind: string
+    previewUrl?: string
+    state?: PendingAttachment["state"]
+    error?: string
+  }
+  onRemove?: () => void
+}) {
+  const isImage = file.kind === "image" || file.mime.startsWith("image/")
+  const Icon =
+    isImage ? ImageIcon : file.kind === "text" ? FileTextIcon : FileIcon
+  return (
+    <Attachment
+      size="sm"
+      state={file.state || "done"}
+      className="max-w-[14rem]"
+    >
+      <AttachmentMedia variant={isImage && file.previewUrl ? "image" : "icon"}>
+        {isImage && file.previewUrl ? (
+          <img src={file.previewUrl} alt={file.name} />
+        ) : (
+          <Icon />
+        )}
+      </AttachmentMedia>
+      <AttachmentContent>
+        <AttachmentTitle>{file.name}</AttachmentTitle>
+        <AttachmentDescription>
+          {file.state === "uploading"
+            ? "Reading…"
+            : file.state === "error"
+              ? file.error || "Failed"
+              : formatBytes(file.size)}
+        </AttachmentDescription>
+      </AttachmentContent>
+      {onRemove ? (
+        <AttachmentActions>
+          <AttachmentAction
+            type="button"
+            aria-label="Remove attachment"
+            onClick={onRemove}
+          >
+            <XIcon />
+          </AttachmentAction>
+        </AttachmentActions>
+      ) : null}
+    </Attachment>
+  )
+}
 
 function emptyMeta(
   messageId: string,
@@ -188,6 +274,21 @@ function copyText(text: string) {
   )
 }
 
+function JumpToLatestButton({ streaming }: { streaming: boolean }) {
+  return (
+    <MessageScrollerButton
+      direction="end"
+      behavior="smooth"
+      variant="secondary"
+      size="sm"
+      className="pointer-events-auto h-8 gap-1.5 rounded-full border bg-background/95 px-3 shadow-md backdrop-blur"
+    >
+      <ArrowDownIcon className="size-3.5" />
+      <span>{streaming ? "Catch up" : "Jump to latest"}</span>
+    </MessageScrollerButton>
+  )
+}
+
 function ToolCard({ tool }: { tool: ToolActivity }) {
   return (
     <Collapsible className="w-full max-w-xl">
@@ -235,14 +336,27 @@ function ToolCard({ tool }: { tool: ToolActivity }) {
 
 export function ChatApp() {
   const listId = useId()
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [items, setItems] = useState<ChatItem[]>([])
   const [input, setInput] = useState("")
+  const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([])
   const [busy, setBusy] = useState(false)
   const [ready, setReady] = useState<"checking" | "ok" | "bad">("checking")
-  const [conversationId, setConversationId] = useState<string | null>(null)
+  const [conversationId, setConversationId] = useState<string | null>(() =>
+    newId("chat")
+  )
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [metaOpen, setMetaOpen] = useState(false)
   const [inspectMeta, setInspectMeta] = useState<MessageMeta | null>(null)
+
+  const readyAttachments = pendingFiles.filter(
+    (f) => f.state === "done" && f.content_base64
+  )
+  const preparing = pendingFiles.some((f) => f.state === "uploading")
+  const canSend =
+    !busy &&
+    !preparing &&
+    (Boolean(input.trim()) || readyAttachments.length > 0)
 
   function openMessageMeta(meta: MessageMeta) {
     setInspectMeta(meta)
@@ -263,30 +377,104 @@ export function ChatApp() {
   }, [])
 
   function resetChat() {
+    for (const f of pendingFiles) {
+      if (f.previewUrl) URL.revokeObjectURL(f.previewUrl)
+    }
+    setPendingFiles([])
     setItems([])
-    setConversationId(null)
+    setConversationId(newId("chat"))
     setInput("")
     toast.message("Started a new chat")
   }
 
-  async function sendMessage(message: string) {
-    if (!message || busy) return
+  async function addFiles(fileList: FileList | File[]) {
+    const files = Array.from(fileList)
+    if (!files.length) return
+    if (pendingFiles.length + files.length > 8) {
+      toast.error("Up to 8 attachments per message")
+      return
+    }
+    for (const file of files) {
+      const localId = newId("file")
+      const previewUrl = file.type.startsWith("image/")
+        ? URL.createObjectURL(file)
+        : undefined
+      setPendingFiles((prev) => [
+        ...prev,
+        {
+          localId,
+          id: "",
+          name: file.name,
+          mime: file.type || "application/octet-stream",
+          size: file.size,
+          kind: file.type.startsWith("image/") ? "image" : "file",
+          previewUrl,
+          state: "uploading",
+        },
+      ])
+      try {
+        const encoded = await encodeAttachment(file)
+        setPendingFiles((prev) =>
+          prev.map((item) =>
+            item.localId === localId
+              ? {
+                  ...item,
+                  ...encoded,
+                  previewUrl: item.previewUrl,
+                  state: "done",
+                }
+              : item
+          )
+        )
+      } catch (err) {
+        setPendingFiles((prev) =>
+          prev.map((item) =>
+            item.localId === localId
+              ? {
+                  ...item,
+                  state: "error",
+                  error: String((err as Error).message || err),
+                }
+              : item
+          )
+        )
+        toast.error(`Could not read ${file.name}`)
+      }
+    }
+  }
+
+  function removePending(localId: string) {
+    setPendingFiles((prev) => {
+      const target = prev.find((f) => f.localId === localId)
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl)
+      return prev.filter((f) => f.localId !== localId)
+    })
+  }
+
+  async function sendMessage(
+    message: string,
+    attachments: ChatAttachment[] = []
+  ) {
+    const trimmed = message.trim()
+    if ((!trimmed && !attachments.length) || busy) return
     if (!ensureApiKey()) return
 
     const userId = newId("user")
     const assistantId = newId("assistant")
     const startedAt = Date.now()
     setInput("")
+    setPendingFiles([])
     setBusy(true)
     setItems((prev) => [
       ...prev,
       {
         id: userId,
         role: "user",
-        content: message,
+        content: trimmed,
+        attachments,
         meta: {
           ...emptyMeta(userId, "user", conversationId),
-          contentChars: message.length,
+          contentChars: trimmed.length,
           finishedAt: new Date().toISOString(),
           durationMs: 0,
         },
@@ -332,30 +520,25 @@ export function ChatApp() {
       }
     }
 
+    const history: HistoryMessage[] = []
+    for (const item of items) {
+      if (item.role === "user" && item.content.trim()) {
+        history.push({ role: "user", content: item.content })
+      } else if (
+        item.role === "assistant" &&
+        !item.streaming &&
+        item.content.trim()
+      ) {
+        history.push({ role: "assistant", content: item.content })
+      }
+    }
+
     try {
-      await streamChat(conversationId, message, (event: StreamEvent) => {
+      await streamChat(
+        trimmed,
+        history,
+        (event: StreamEvent) => {
         switch (event.type) {
-          case "conversation":
-            if (event.id) {
-              setConversationId(event.id)
-              patchAssistant((item) => ({
-                ...item,
-                meta: pushMetaEvent(item, event, {
-                  conversationId: event.id,
-                }),
-              }))
-              setItems((prev) =>
-                prev.map((item) =>
-                  item.id === userId && item.role === "user"
-                    ? {
-                        ...item,
-                        meta: { ...item.meta, conversationId: event.id },
-                      }
-                    : item
-                )
-              )
-            }
-            break
           case "status":
             patchAssistant((item) => ({
               ...item,
@@ -540,7 +723,9 @@ export function ChatApp() {
             }))
             break
         }
-      })
+      },
+        attachments
+      )
     } catch (err) {
       const detail = String((err as Error).message || err)
       toast.error(detail)
@@ -568,7 +753,19 @@ export function ChatApp() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    await sendMessage(input.trim())
+    if (!canSend) return
+    const attachments = readyAttachments.map(
+      ({ id, name, mime, size, kind, previewUrl, content_base64 }) => ({
+        id,
+        name,
+        mime,
+        size,
+        kind,
+        previewUrl,
+        content_base64,
+      })
+    )
+    await sendMessage(input, attachments)
   }
 
   return (
@@ -737,10 +934,18 @@ export function ChatApp() {
                 </div>
               </div>
             ) : (
-              <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+              <MessageScrollerProvider
+                autoScroll
+                defaultScrollPosition="last-anchor"
+                scrollPreviousItemPeek={72}
+                scrollMargin={12}
+              >
                 <MessageScroller className="relative min-h-0 flex-1 overflow-hidden">
                   <MessageScrollerViewport className="absolute inset-0 size-auto">
-                    <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-8">
+                    <MessageScrollerContent
+                      className="mx-auto w-full max-w-3xl gap-6 px-4 pt-8 pb-4"
+                      spacerClassName="min-h-24 grow"
+                    >
                       <MessageScrollerItem messageId={`${listId}-today`}>
                         <Marker variant="separator">
                           <MarkerContent>Today</MarkerContent>
@@ -752,6 +957,7 @@ export function ChatApp() {
                           <MessageScrollerItem
                             key={item.id}
                             messageId={item.id}
+                            scrollAnchor
                           >
                               <Message align="end">
                               <MessageAvatar>
@@ -763,11 +969,20 @@ export function ChatApp() {
                               </MessageAvatar>
                               <MessageContent>
                                 <MessageHeader>You</MessageHeader>
-                                <Bubble variant="default" align="end">
-                                  <BubbleContent>
-                                    <Markdown>{item.content}</Markdown>
-                                  </BubbleContent>
-                                </Bubble>
+                                {item.attachments?.length ? (
+                                  <AttachmentGroup className="mb-2 justify-end">
+                                    {item.attachments.map((file) => (
+                                      <FileChip key={file.id} file={file} />
+                                    ))}
+                                  </AttachmentGroup>
+                                ) : null}
+                                {item.content ? (
+                                  <Bubble variant="default" align="end">
+                                    <BubbleContent>
+                                      <Markdown>{item.content}</Markdown>
+                                    </BubbleContent>
+                                  </Bubble>
+                                ) : null}
                                 <MessageFooter>
                                   <Tooltip>
                                     <TooltipTrigger
@@ -791,6 +1006,9 @@ export function ChatApp() {
                                   </Tooltip>
                                   <span className="text-muted-foreground">
                                     {item.content.length} chars
+                                    {item.attachments?.length
+                                      ? ` · ${item.attachments.length} file${item.attachments.length === 1 ? "" : "s"}`
+                                      : ""}
                                   </span>
                                 </MessageFooter>
                               </MessageContent>
@@ -911,7 +1129,7 @@ export function ChatApp() {
                       )}
                     </MessageScrollerContent>
                   </MessageScrollerViewport>
-                  <MessageScrollerButton />
+                  <JumpToLatestButton streaming={busy} />
                 </MessageScroller>
               </MessageScrollerProvider>
             )}
@@ -920,7 +1138,31 @@ export function ChatApp() {
               <form
                 className="mx-auto flex w-full max-w-3xl flex-col gap-2"
                 onSubmit={onSubmit}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (e.dataTransfer.files?.length) {
+                    void addFiles(e.dataTransfer.files)
+                  }
+                }}
               >
+                {pendingFiles.length ? (
+                  <AttachmentGroup>
+                    {pendingFiles.map((file) => (
+                      <FileChip
+                        key={file.localId}
+                        file={file}
+                        onRemove={
+                          busy ? undefined : () => removePending(file.localId)
+                        }
+                      />
+                    ))}
+                  </AttachmentGroup>
+                ) : null}
                 <InputGroup className="h-auto min-h-14 rounded-2xl">
                   <InputGroupTextarea
                     value={input}
@@ -934,12 +1176,48 @@ export function ChatApp() {
                         void onSubmit(e)
                       }
                     }}
+                    onPaste={(e) => {
+                      const files = Array.from(e.clipboardData.files || [])
+                      if (files.length) {
+                        e.preventDefault()
+                        void addFiles(files)
+                      }
+                    }}
                   />
                   <InputGroupAddon
                     align="block-end"
                     className="justify-between border-t"
                   >
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        className="hidden"
+                        multiple
+                        onChange={(e) => {
+                          if (e.target.files?.length) {
+                            void addFiles(e.target.files)
+                          }
+                          e.target.value = ""
+                        }}
+                      />
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <InputGroupButton
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={busy}
+                              aria-label="Attach files"
+                              onClick={() => fileInputRef.current?.click()}
+                            />
+                          }
+                        >
+                          <PaperclipIcon />
+                        </TooltipTrigger>
+                        <TooltipContent>Attach files</TooltipContent>
+                      </Tooltip>
                       <KbdGroup>
                         <Kbd>↵</Kbd>
                       </KbdGroup>
@@ -955,7 +1233,7 @@ export function ChatApp() {
                       type="submit"
                       variant="default"
                       size="sm"
-                      disabled={busy || !input.trim()}
+                      disabled={!canSend}
                     >
                       {busy ? (
                         <Spinner data-icon="inline-start" />

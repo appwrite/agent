@@ -12,9 +12,11 @@ from urllib.parse import urlparse
 
 from langchain_core.tools import tool
 
+from app.attachments import text_from_bytes
 from app.config import get_settings
 from app.graph.browser import browser_fetch_text, host_of, web_search_results
 from app.graph.skills import load_skill, skill_index_text
+from app.turn_context import find_turn_attachment
 
 _OPS = {
     ast.Add: operator.add,
@@ -212,6 +214,34 @@ def appwrite_skill(
 
 
 @tool
+def read_attachment(
+    attachment_id: Annotated[str, "Attachment id or filename from the current user turn"],
+    max_chars: Annotated[
+        int,
+        "Max characters to return for text-like files (default 12000)",
+    ] = 12_000,
+) -> str:
+    """Read an attachment from the current request (stateless; this turn only)."""
+    att = find_turn_attachment(attachment_id)
+    if not att:
+        return (
+            f"Unknown attachment id={attachment_id!r}. "
+            "Only files attached on this turn are available."
+        )
+    data = att.get("_bytes")
+    if not isinstance(data, (bytes, bytearray)):
+        return f"Attachment {attachment_id!r} has no inline content on this request."
+    body = text_from_bytes(
+        bytes(data),
+        max_chars=max(500, min(int(max_chars), 50_000)),
+    )
+    return (
+        f"name={att.get('name')!r} mime={att.get('mime')} "
+        f"size={att.get('size')}\n\n{body}"
+    )
+
+
+@tool
 def sandbox_exec(
     instruction: Annotated[str, "What to run inside the project sandbox"],
 ) -> str:
@@ -233,6 +263,7 @@ def build_tools() -> list:
         web_search,
         browser_fetch,
         appwrite_skill,
+        read_attachment,
         sandbox_exec,
     ]
 
@@ -245,5 +276,6 @@ def build_appwrite_tools() -> list:
         web_search,
         current_time,
         calculator,
+        read_attachment,
         sandbox_exec,
     ]

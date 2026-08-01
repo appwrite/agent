@@ -2,15 +2,15 @@
 
 POC assistant engine for Appwrite Cloud `/v1/assistant`, built on [LangGraph](https://github.com/langchain-ai/langgraph).
 
-Cloud owns conversation persistence, Realtime, and auth. This service is the agent runtime only — cluster/compose-internal, never public.
+**Stateless by design.** Cloud (or any proxy) owns conversation persistence, Realtime, auth, MCP OAuth/tokens, and attachments. This service is the agent runtime only — every turn receives the context it needs over the API. Cluster/compose-internal; never public.
 
 ## What you get
 
 - **Supervisor + subagents** (`appwrite`, `researcher`, `worker`) via LangGraph
-- **Appwrite expert** with official [agent-skills](https://github.com/appwrite/agent-skills) vendored under `.agents/skills/` (CLI + 10 SDK languages), loaded on demand via `appwrite_skill`
-- **Safe tools by default** — no host shell / no container `curl`/`bash` for the model
-- Tools today: `calculator`, `current_time`, `web_search` (browser, no API key), `browser_fetch` (any public https), `appwrite_skill`, `sandbox_exec` stub (Function MCP later)
-- FastAPI HTTP API + **shadcn chat UI** ([MessageScroller / Message / Bubble / Marker](https://ui.shadcn.com/docs/changelog/2026-06-chat-components)) with live tool/subagent markers and SSE streaming
+- **Appwrite expert** with official [agent-skills](https://github.com/appwrite/agent-skills) vendored under `.agents/skills/`
+- **Safe tools by default** — no host shell for the model
+- Tools: `calculator`, `current_time`, `web_search`, `browser_fetch`, `appwrite_skill`, `sandbox_exec` stub, plus MCP tools from credentials on the turn
+- FastAPI + shadcn chat UI (POC holds history/tokens in the browser)
 
 ## Quick start
 
@@ -21,21 +21,53 @@ cp .env.example .env
 docker compose up --build -d
 
 curl -s http://127.0.0.1:8000/health
-curl -s -H "X-Session-API-Key: $ASSISTANT_API_KEY" \
+curl -sN -H "X-Session-API-Key: $ASSISTANT_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"message":"What is 17*19?"}' \
-  http://127.0.0.1:8000/api/conversations
+  -d '{"message":"What is 17*19?","history":[]}' \
+  http://127.0.0.1:8000/api/turn
 ```
 
 - API docs: http://127.0.0.1:8000/docs
 - UI: http://127.0.0.1:3001
 
-## Services
+## API
 
-| Service | Role |
-|---------|------|
-| `assistant` | LangGraph + FastAPI (`:8000`) |
-| `ui` | React + shadcn chat UI; nginx proxies `/api` → assistant (`:3001`) |
+| Method | Path | Notes |
+|--------|------|-------|
+| GET | `/health` | Liveness |
+| GET | `/ready` | LLM configured? |
+| GET | `/api/meta` | Auth — runtime inspection (suggested MCP URLs; no connection state) |
+| POST | `/api/turn` | Auth — one turn (SSE) |
+
+### Turn request
+
+```json
+{
+  "message": "What is 17*19?",
+  "history": [
+    { "role": "user", "content": "Hi" },
+    { "role": "assistant", "content": "Hello!" }
+  ],
+  "attachments": [
+    { "name": "notes.txt", "mime": "text/plain", "content_base64": "..." }
+  ],
+  "mcp_connections": [
+    {
+      "id": "appwrite",
+      "name": "Appwrite",
+      "url": "https://mcp.appwrite.io/",
+      "tokens": { "access_token": "...", "refresh_token": "..." },
+      "client_info": {}
+    }
+  ]
+}
+```
+
+SSE events include `route`, `subagent_*`, `tool_*`, `token`, `mcp_credentials` (refreshed tokens for the proxy), `done`, `complete`.
+
+## MCP
+
+OAuth is **not** handled by this engine. The client/proxy obtains tokens and passes the full server definition + credentials on every `/api/turn` as `mcp_connections`. Persist any `mcp_credentials` SSE events upstream.
 
 ## Environment
 
@@ -43,77 +75,21 @@ curl -s -H "X-Session-API-Key: $ASSISTANT_API_KEY" \
 |----------|----------|---------|
 | `ASSISTANT_API_KEY` | yes (prod) | Clients send `X-Session-API-Key` |
 | `LLM_API_KEY` | yes | Model provider API key |
-| `LLM_MODEL` | no | Default `openai/gpt-4o` (also accepts bare `gpt-4o`) |
+| `LLM_MODEL` | no | Default `openai/gpt-4o` |
 | `LLM_BASE_URL` | no | Optional OpenAI-compatible base URL |
 | `WEB_SEARCH_ENABLED` | no | Headless browser web search (default `true`) |
-| `MCP_OAUTH_REDIRECT_BASE` | no | Browser origin for OAuth callback (default `http://localhost:3001`) |
-| `MCP_DATA_DIR` | no | Where OAuth tokens are stored (default `.data/mcp` / `/data/mcp` in Docker) |
-| `ASSISTANT_UI_PORT` | no | Host port for UI (default `3001`) |
-
-## API (POC)
-
-| Method | Path | Notes |
-|--------|------|-------|
-| GET | `/health` | Liveness |
-| GET | `/ready` | LLM configured? |
-| GET | `/api/settings` | Auth — runtime inspection |
-| GET | `/api/mcp/servers` | Auth — MCP connection status |
-| POST | `/api/mcp/servers` | Auth — add custom MCP server |
-| POST | `/api/mcp/servers/{id}/connect` | Auth — start OAuth; returns `authorization_url` |
-| POST | `/api/mcp/servers/{id}/disconnect` | Auth — drop tokens |
-| GET | `/api/mcp/oauth/callback` | OAuth redirect (no session header; `state` guarded) |
-| GET | `/api/conversations/count` | Auth |
-| GET | `/api/conversations` | Auth |
-| POST | `/api/conversations` | `{ "message": "..." }` — create + run |
-| POST | `/api/conversations/stream` | SSE: create + stream tools/subagents/tokens |
-| POST | `/api/conversations/{id}/messages` | Continue thread |
-| POST | `/api/conversations/{id}/messages/stream` | SSE continue thread |
-| GET | `/api/conversations/{id}` | Fetch thread |
-
-SSE event types include `route`, `subagent_start` / `subagent_end`, `tool_start` / `tool_end`, `token`, `done`.
+| `ATTACHMENTS_MAX_BYTES` | no | Max inline attachment size (default 10MB) |
 
 ## Security
 
 - Do not expose this container on a public Gateway/HTTPRoute.
-- The model **cannot** run host shell commands. Outbound browsing via `web_search` / `browser_fetch` (Playwright; public https only).
-- `sandbox_exec` is a stub — Cloud should execute code only inside per-project Function sandboxes.
+- The model cannot run host shell commands.
 - Unauthenticated mode (empty API key) is for local smoke tests only.
-
-## MCP connections (OAuth)
-
-The assistant can connect to remote MCP servers over Streamable HTTP + OAuth 2.1
-(PKCE), including the hosted Appwrite MCP at `https://mcp.appwrite.io/`.
-
-1. Open the UI → Agent settings → **Connections**
-2. Click **Connect** on Appwrite (or add another HTTPS MCP URL)
-3. Complete the browser OAuth consent
-4. Connected tools are available to agents on the next chat turn
-
-Set the browser-facing origin used for the OAuth redirect:
-
-```bash
-MCP_OAUTH_REDIRECT_BASE=http://localhost:3001
-```
-
-Callback URL: `{MCP_OAUTH_REDIRECT_BASE}/api/mcp/oauth/callback`
-
-Tokens are stored under `MCP_DATA_DIR` (Docker volume `assistant-mcp-data` by default).
 
 ## Appwrite skills
 
-Official skills from [appwrite/agent-skills](https://github.com/appwrite/agent-skills) are vendored under `.agents/skills/` (tracked via `skills-lock.json`).
-
-Refresh when upstream publishes updates:
-
 ```bash
-./scripts/update-appwrite-skills.sh          # update + install any new skills
-./scripts/update-appwrite-skills.sh list     # show installed
-./scripts/update-appwrite-skills.sh check    # lockfile summary
-```
-
-Requires Node/`npx`. Then commit `.agents/skills/` + `skills-lock.json` and rebuild:
-
-```bash
+./scripts/update-appwrite-skills.sh
 docker compose up --build -d assistant
 ```
 

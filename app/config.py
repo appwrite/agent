@@ -16,16 +16,14 @@ class Settings(BaseSettings):
     # Headless browser web search (no Search API key). Default on.
     web_search_enabled: bool = Field(default=True, alias="WEB_SEARCH_ENABLED")
 
-    # Public origin used for MCP OAuth redirect_uri (usually the UI host).
-    mcp_oauth_redirect_base: str = Field(
-        default="http://localhost:3001",
-        alias="MCP_OAUTH_REDIRECT_BASE",
+    attachments_max_bytes: int = Field(
+        default=10_000_000,
+        alias="ATTACHMENTS_MAX_BYTES",
     )
-    mcp_oauth_client_name: str = Field(
-        default="Appwrite Assistant",
-        alias="MCP_OAUTH_CLIENT_NAME",
+    attachments_max_per_message: int = Field(
+        default=8,
+        alias="ATTACHMENTS_MAX_PER_MESSAGE",
     )
-    mcp_data_dir: str = Field(default=".data/mcp", alias="MCP_DATA_DIR")
 
     host: str = Field(default="0.0.0.0", alias="HOST")
     port: int = Field(default=8000, alias="PORT")

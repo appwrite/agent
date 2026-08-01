@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.config import get_settings
-from app.mcp.routes import router as mcp_router
 
 settings = get_settings()
 
@@ -22,7 +21,6 @@ app.add_middleware(
 )
 
 app.include_router(router)
-app.include_router(mcp_router)
 
 
 @app.get("/")

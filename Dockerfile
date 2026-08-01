@@ -15,8 +15,6 @@ RUN pip install --upgrade pip \
 COPY app ./app
 COPY .agents ./.agents
 
-RUN mkdir -p /data/mcp
-
 EXPOSE 8000
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=6 --start-period=45s \

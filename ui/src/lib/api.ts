@@ -13,6 +13,7 @@ export type StreamEvent = {
   detail?: string
   tool_calls?: number
   at?: string
+  credentials?: McpConnectionCredentials[]
 }
 
 export type ToolActivityMeta = {
@@ -38,6 +39,14 @@ export type MessageMeta = {
   finishReason?: string
   tools: ToolActivityMeta[]
   events: StreamEvent[]
+}
+
+export type SuggestedMcpServer = {
+  id: string
+  name: string
+  url: string
+  description: string
+  builtin: boolean
 }
 
 export type AgentSettings = {
@@ -75,9 +84,10 @@ export type AgentSettings = {
     loader_tool: string
   }
   mcp?: {
-    oauth_redirect_base: string
-    redirect_uri: string
-    servers: McpServerStatus[]
+    note?: string
+    suggested_servers?: SuggestedMcpServer[]
+    /** @deprecated */
+    servers?: McpServerStatus[]
   }
   runtime: {
     max_handoffs: number
@@ -120,9 +130,21 @@ export type McpServerStatus = {
   url: string
   description: string
   builtin: boolean
-  status: "connected" | "connecting" | "disconnected" | string
+  status: "connected" | "disconnected" | string
   tools: string[]
 }
+
+export type McpConnectionCredentials = {
+  id: string
+  name?: string
+  url?: string
+  description?: string
+  tokens?: Record<string, unknown>
+  client_info?: Record<string, unknown>
+}
+
+const MCP_CONNECTIONS_KEY = "assistant_mcp_connections"
+const MCP_CUSTOM_SERVERS_KEY = "assistant_mcp_custom_servers"
 
 function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = {}
@@ -140,58 +162,169 @@ async function readError(res: Response): Promise<string> {
   }
 }
 
-export async function fetchAgentSettings(): Promise<AgentSettings> {
-  const res = await fetch("/api/settings", { headers: authHeaders() })
-  if (!res.ok) throw new Error(await readError(res))
-  return res.json()
+export function loadCustomMcpServers(): SuggestedMcpServer[] {
+  try {
+    const raw = localStorage.getItem(MCP_CUSTOM_SERVERS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
 }
 
-export async function fetchMcpServers(): Promise<McpServerStatus[]> {
-  const res = await fetch("/api/mcp/servers", { headers: authHeaders() })
-  if (!res.ok) throw new Error(await readError(res))
-  const data = await res.json()
-  return data.servers || []
+export function loadMcpConnections(): McpConnectionCredentials[] {
+  try {
+    const raw = localStorage.getItem(MCP_CONNECTIONS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    const custom = loadCustomMcpServers()
+    return parsed.map((c: McpConnectionCredentials) => {
+      const meta = custom.find((s) => s.id === c.id)
+      return {
+        ...c,
+        url: c.url || meta?.url,
+        name: c.name || meta?.name,
+        description: c.description || meta?.description || "",
+      }
+    })
+  } catch {
+    return []
+  }
 }
 
-export async function connectMcpServer(
-  serverId: string
-): Promise<{ authorization_url: string; status?: string }> {
-  const res = await fetch(`/api/mcp/servers/${encodeURIComponent(serverId)}/connect`, {
-    method: "POST",
-    headers: authHeaders(),
-  })
-  if (!res.ok) throw new Error(await readError(res))
-  return res.json()
+export function saveMcpConnection(conn: McpConnectionCredentials): void {
+  const next = loadMcpConnections().filter((c) => c.id !== conn.id)
+  next.push(conn)
+  localStorage.setItem(MCP_CONNECTIONS_KEY, JSON.stringify(next))
 }
 
-export async function disconnectMcpServer(serverId: string): Promise<void> {
-  const res = await fetch(
-    `/api/mcp/servers/${encodeURIComponent(serverId)}/disconnect`,
-    { method: "POST", headers: authHeaders() }
-  )
-  if (!res.ok) throw new Error(await readError(res))
+export function removeMcpConnection(serverId: string): void {
+  const next = loadMcpConnections().filter((c) => c.id !== serverId)
+  localStorage.setItem(MCP_CONNECTIONS_KEY, JSON.stringify(next))
 }
 
-export async function addMcpServer(input: {
+export function saveCustomMcpServer(server: {
   id: string
   name: string
   url: string
   description?: string
-}): Promise<McpServerStatus> {
-  const res = await fetch("/api/mcp/servers", {
-    method: "POST",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  })
+}): SuggestedMcpServer {
+  const row: SuggestedMcpServer = {
+    id: server.id,
+    name: server.name,
+    url: server.url,
+    description: server.description || "",
+    builtin: false,
+  }
+  const next = loadCustomMcpServers().filter((s) => s.id !== row.id)
+  next.push(row)
+  localStorage.setItem(MCP_CUSTOM_SERVERS_KEY, JSON.stringify(next))
+  return row
+}
+
+export function listLocalMcpServers(
+  suggested: SuggestedMcpServer[] = []
+): McpServerStatus[] {
+  const creds = new Set(
+    loadMcpConnections()
+      .filter(
+        (c) => c.tokens && (c.tokens as { access_token?: string }).access_token
+      )
+      .map((c) => c.id)
+  )
+  const byId = new Map<string, SuggestedMcpServer>()
+  for (const s of suggested) byId.set(s.id, s)
+  for (const s of loadCustomMcpServers()) {
+    if (!byId.has(s.id)) byId.set(s.id, s)
+  }
+  return Array.from(byId.values()).map((s) => ({
+    ...s,
+    status: creds.has(s.id) ? "connected" : "disconnected",
+    tools: [],
+  }))
+}
+
+export async function fetchMeta(): Promise<AgentSettings> {
+  const res = await fetch("/api/meta", { headers: authHeaders() })
   if (!res.ok) throw new Error(await readError(res))
-  const data = await res.json()
-  return data.server
+  return res.json()
+}
+
+/** @deprecated use fetchMeta */
+export async function fetchAgentSettings(): Promise<AgentSettings> {
+  return fetchMeta()
+}
+
+export function disconnectMcpServer(serverId: string): void {
+  removeMcpConnection(serverId)
+}
+
+export function addMcpServer(input: {
+  id: string
+  name: string
+  url: string
+  description?: string
+}): SuggestedMcpServer {
+  return saveCustomMcpServer(input)
+}
+
+export type ChatAttachment = {
+  id: string
+  name: string
+  mime: string
+  size: number
+  kind: "image" | "text" | "file" | string
+  previewUrl?: string
+  content_base64?: string
+}
+
+export type HistoryMessage = {
+  role: "user" | "assistant"
+  content: string
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = String(reader.result || "")
+      const comma = result.indexOf(",")
+      resolve(comma >= 0 ? result.slice(comma + 1) : result)
+    }
+    reader.onerror = () =>
+      reject(reader.error || new Error("Failed to read file"))
+    reader.readAsDataURL(file)
+  })
+}
+
+export async function encodeAttachment(file: File): Promise<ChatAttachment> {
+  const content_base64 = await fileToBase64(file)
+  const mime = file.type || "application/octet-stream"
+  const kind = mime.startsWith("image/")
+    ? "image"
+    : mime.startsWith("text/") ||
+        /\.(txt|md|json|ya?ml|csv|xml|html?|css|js|ts|tsx|jsx|py)$/i.test(
+          file.name
+        )
+      ? "text"
+      : "file"
+  return {
+    id: `${file.name}-${file.size}-${file.lastModified}`,
+    name: file.name,
+    mime,
+    size: file.size,
+    kind,
+    content_base64,
+  }
 }
 
 export async function streamChat(
-  conversationId: string | null,
   message: string,
-  onEvent: (event: StreamEvent) => void
+  history: HistoryMessage[],
+  onEvent: (event: StreamEvent) => void,
+  attachments: ChatAttachment[] = []
 ): Promise<void> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -199,27 +332,27 @@ export async function streamChat(
   const key = apiKey()
   if (key) headers["X-Session-API-Key"] = key
 
-  const url = conversationId
-    ? `/api/conversations/${conversationId}/messages/stream`
-    : "/api/conversations/stream"
-
-  const res = await fetch(url, {
+  const res = await fetch("/api/turn", {
     method: "POST",
     headers,
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({
+      message,
+      history,
+      attachments: attachments.map(
+        ({ id, name, mime, size, kind, content_base64 }) => ({
+          id,
+          name,
+          mime,
+          size,
+          kind,
+          content_base64,
+        })
+      ),
+      mcp_connections: loadMcpConnections(),
+    }),
   })
 
-  if (!res.ok) {
-    const text = await res.text()
-    let detail = text
-    try {
-      detail = JSON.parse(text).detail || text
-    } catch {
-      /* keep */
-    }
-    throw new Error(detail || res.statusText)
-  }
-
+  if (!res.ok) throw new Error(await readError(res))
   if (!res.body) throw new Error("No response body")
 
   const reader = res.body.getReader()
@@ -240,7 +373,16 @@ export async function streamChat(
         .join("")
       if (!line) continue
       try {
-        onEvent(JSON.parse(line) as StreamEvent)
+        const event = JSON.parse(line) as StreamEvent
+        if (
+          event.type === "mcp_credentials" &&
+          Array.isArray(event.credentials)
+        ) {
+          for (const cred of event.credentials) {
+            if (cred?.id) saveMcpConnection(cred)
+          }
+        }
+        onEvent(event)
       } catch {
         /* skip */
       }
@@ -250,9 +392,7 @@ export async function streamChat(
 
 export function ensureApiKey(): boolean {
   if (apiKey()) return true
-  const key = window.prompt(
-    "Session API key (ASSISTANT_API_KEY)"
-  )
+  const key = window.prompt("Session API key (ASSISTANT_API_KEY)")
   if (!key) return false
   localStorage.setItem("assistant_api_key", key)
   return true

@@ -80,9 +80,11 @@ def agent_settings_snapshot() -> dict[str, Any]:
             "loader_tool": "appwrite_skill",
         },
         "mcp": {
-            "oauth_redirect_base": settings.mcp_oauth_redirect_base,
-            "redirect_uri": get_mcp_manager().redirect_uri(),
-            "servers": get_mcp_manager().status_snapshot(),
+            "note": (
+                "OAuth is client/proxy-owned. Pass full server defs + tokens "
+                "on each POST /api/turn as mcp_connections."
+            ),
+            "suggested_servers": get_mcp_manager().suggested_servers(),
         },
         "runtime": {
             "max_handoffs": MAX_HANDOFFS,
@@ -118,7 +120,6 @@ def agent_settings_snapshot() -> dict[str, Any]:
             "LLM_MODEL": settings.llm_model,
             "LLM_BASE_URL": settings.llm_base_url or "",
             "WEB_SEARCH_ENABLED": "true" if settings.web_search_enabled else "false",
-            "MCP_OAUTH_REDIRECT_BASE": settings.mcp_oauth_redirect_base,
             "HOST": settings.host,
             "PORT": str(settings.port),
             "LLM_API_KEY": "••••••" if settings.llm_api_key else "",

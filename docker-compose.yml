@@ -13,11 +13,6 @@ services:
       LLM_MODEL: ${LLM_MODEL:-openai/gpt-4o}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       WEB_SEARCH_ENABLED: ${WEB_SEARCH_ENABLED:-true}
-      MCP_OAUTH_REDIRECT_BASE: ${MCP_OAUTH_REDIRECT_BASE:-http://localhost:3001}
-      MCP_OAUTH_CLIENT_NAME: ${MCP_OAUTH_CLIENT_NAME:-Appwrite Assistant}
-      MCP_DATA_DIR: ${MCP_DATA_DIR:-/data/mcp}
-    volumes:
-      - assistant-mcp-data:/data/mcp
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
       interval: 10s
@@ -40,6 +35,3 @@ services:
       assistant:
         condition: service_healthy
     restart: unless-stopped
-
-volumes:
-  assistant-mcp-data:
