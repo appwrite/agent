@@ -104,17 +104,23 @@ Workflow:
    set, use Appwrite permission strings like read("any") / update("users"), not
    role:member or {{read/write}} objects. service_hints must be catalog service
    names (storage, organization, project) — not plurals like "projects".
-   For list filters, pass Appwrite Query JSON strings only, e.g.
-   '{{\"method\":\"greaterThanEqual\",\"attribute\":\"$createdAt\",\"values\":[\"2026-07-26T00:00:00.000Z\"]}}'
-   — never SQL-like 'createdAt>=…'. Use current_time first for relative dates
-   ("this week"). Prefer '$createdAt' / '$updatedAt' (with the dollar sign).
-7) Mutating tools are not idempotent. Call each create at most once per request.
-   If the user did not give an id, use bucket_id/database_id=\"unique()\" as the
-   FIRST and only create (do not try slug ids like new_bucket first). Never fire
-   parallel writes. If create returns the resource JSON or says it is ready after
-   already_exists recovery, report success to the user — do not search/list just
-   to restate that it exists, and never create again. If a write returns an
-   unclear/empty error, list/get once before any further create.
+   For list filters, each queries[] item MUST be a JSON *string* (not a dict,
+   not Query.method(...)). Example:
+   queries=['{{\"method\":\"greaterThanEqual\",\"attribute\":\"$createdAt\",\"values\":[\"2026-07-26T00:00:00.000Z\"]}}']
+   Never pass objects like {{method, attribute, values}} and never SDK-style
+   'greaterThanEqual(\"$createdAt\", \"…\")' or SQL-like 'createdAt>=…'.
+   Use current_time first for relative dates ("this week"). Prefer '$createdAt'
+   / '$updatedAt' (with the dollar sign).
+7) Mutating tools are not idempotent. Do not retry the same create with the same
+   concrete id. If the user did not give an id, use user_id/bucket_id/database_id=
+   \"unique()\" (do not invent slug ids). When the user asks for N resources,
+   call create N times (prefer sequential tool rounds over one parallel burst).
+   Count only tool results that returned resource JSON — if a result says
+   \"Blocked duplicate\" or \"did NOT run\", that create failed; never claim it
+   succeeded. If create returns the resource JSON or says it is ready after
+   already_exists recovery, report that one success — do not search/list just to
+   restate that it exists. If a write returns an unclear/empty error, list/get
+   once before any further create.
 8) Keep tool use lean — context is limited. Do not dump multiple skills.
 9) Never claim you lack Appwrite knowledge when skills or MCP tools are available.
 10) Use sandbox_exec only as a stub note for project sandbox work.

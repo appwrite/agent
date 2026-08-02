@@ -52,11 +52,12 @@ def _looks_like_failure(text: str) -> bool:
     if not lowered:
         return True
     failure_prefixes = (
-        "error",
-        "i could not",
-        "i can't",
-        "i cannot",
-        "unable to",
+        "error:",
+        "error -",
+        "i could not complete",
+        "i could not run",
+        "unable to complete",
+        "unable to run",
         "failed to",
         "browser_fetch is disabled",
         "sandbox_exec is not configured",
