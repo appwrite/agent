@@ -104,6 +104,10 @@ Workflow:
    set, use Appwrite permission strings like read("any") / update("users"), not
    role:member or {{read/write}} objects. service_hints must be catalog service
    names (storage, organization, project) — not plurals like "projects".
+   For list filters, pass Appwrite Query JSON strings only, e.g.
+   '{{\"method\":\"greaterThanEqual\",\"attribute\":\"$createdAt\",\"values\":[\"2026-07-26T00:00:00.000Z\"]}}'
+   — never SQL-like 'createdAt>=…'. Use current_time first for relative dates
+   ("this week"). Prefer '$createdAt' / '$updatedAt' (with the dollar sign).
 7) Mutating tools are not idempotent. Call each create at most once per request.
    If the user did not give an id, use bucket_id/database_id=\"unique()\" as the
    FIRST and only create (do not try slug ids like new_bucket first). Never fire

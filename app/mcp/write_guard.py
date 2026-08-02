@@ -3,11 +3,17 @@
 State lives on the wrapped tool instance (closure), not ContextVars, so parallel
 LangGraph tool calls in the same turn share it. MCP/Appwrite errors are often
 raised as exceptions — those must be caught or recovery never runs.
+
+MCP tools from langchain_mcp_adapters use response_format='content_and_artifact',
+so every return from the wrapped coroutine must be a (content, artifact) 2-tuple.
+Returning a plain string after catching ToolException raises ValueError inside
+StructuredTool and drops tool_end from the stream.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import secrets
@@ -36,6 +42,20 @@ _ID_KEYS = (
     "row_id",
     "document_id",
 )
+
+# Models often pass SQL-ish filters; Appwrite expects Query JSON strings.
+_QUERY_OP_RE = re.compile(
+    r"^\s*(\$?[A-Za-z_][A-Za-z0-9_]*)\s*(>=|<=|!=|=|>|<)\s*(.+?)\s*$"
+)
+_QUERY_OP_MAP = {
+    ">=": "greaterThanEqual",
+    "<=": "lessThanEqual",
+    ">": "greaterThan",
+    "<": "lessThan",
+    "=": "equal",
+    "!=": "notEqual",
+}
+_QUERY_DOLLAR_ATTRS = frozenset({"createdAt", "updatedAt", "id", "sequence"})
 
 
 def begin_turn_write_guard() -> None:
@@ -73,6 +93,45 @@ def _expand_unique_in_obj(obj: Any, *, ids: dict[str, str], prefix: str = "") ->
             for i, item in enumerate(obj)
         ]
     return _expand_unique(obj, slot=prefix or "value", ids=ids)
+
+
+def _normalize_query_item(item: str) -> str:
+    raw = item.strip()
+    if not raw or raw.startswith("{") or raw.startswith("["):
+        return raw
+
+    match = _QUERY_OP_RE.match(raw)
+    if not match:
+        return raw
+
+    attr, op, value = match.group(1), match.group(2), match.group(3).strip()
+    if (value.startswith('"') and value.endswith('"')) or (
+        value.startswith("'") and value.endswith("'")
+    ):
+        value = value[1:-1]
+    if not attr.startswith("$") and attr in _QUERY_DOLLAR_ATTRS:
+        attr = f"${attr}"
+    method = _QUERY_OP_MAP.get(op)
+    if not method:
+        return raw
+    return json.dumps(
+        {"method": method, "attribute": attr, "values": [value]},
+        separators=(",", ":"),
+    )
+
+
+def _normalize_arguments(arguments: Any) -> Any:
+    if not isinstance(arguments, dict):
+        return arguments
+    queries = arguments.get("queries")
+    if not isinstance(queries, list):
+        return arguments
+    out = dict(arguments)
+    out["queries"] = [
+        _normalize_query_item(item) if isinstance(item, str) else item
+        for item in queries
+    ]
+    return out
 
 
 def _tool_name_from_payload(payload: dict[str, Any]) -> str:
@@ -125,12 +184,11 @@ def _as_text(result: Any) -> str:
     return result if isinstance(result, str) else str(result)
 
 
-def _with_text(result: Any, text: str) -> Any:
-    if isinstance(result, tuple):
-        if len(result) == 1:
-            return (text,)
-        return (text, *result[1:])
-    return text
+def _content_and_artifact(text: str, result: Any = None) -> tuple[str, Any]:
+    """MCP LangChain tools require response_format='content_and_artifact'."""
+    if isinstance(result, tuple) and len(result) >= 2:
+        return text, result[1]
+    return text, None
 
 
 def _is_already_exists(text: str) -> bool:
@@ -204,15 +262,15 @@ def wrap_mcp_tool(tool: BaseTool) -> BaseTool:
         async with lock:
             if is_create and create_attempts.get(tool_name, 0) >= 1:
                 previous = create_results.get(tool_name, "")
-                return (
+                return _content_and_artifact(
                     f"Blocked duplicate {tool_name} in this turn.\n"
                     f"Previous result:\n{previous}\n\n"
                     "Use that result and finish. Do not create again."
                 )
 
             if "arguments" in payload:
-                payload["arguments"] = _expand_unique_in_obj(
-                    payload["arguments"], ids=unique_ids
+                payload["arguments"] = _normalize_arguments(
+                    _expand_unique_in_obj(payload["arguments"], ids=unique_ids)
                 )
 
             if is_create:
@@ -236,9 +294,7 @@ def wrap_mcp_tool(tool: BaseTool) -> BaseTool:
                 )
                 if recovered:
                     create_results[tool_name] = recovered
-                    if result is not None:
-                        return _with_text(result, recovered)
-                    return recovered
+                    return _content_and_artifact(recovered, result)
 
                 annotated = (
                     f"{text.rstrip()}\n\n"
@@ -246,18 +302,19 @@ def wrap_mcp_tool(tool: BaseTool) -> BaseTool:
                     "Treat as success: list/get it and report it. Do NOT create again."
                 )
                 create_results[tool_name] = annotated
-                if result is not None:
-                    return _with_text(result, annotated)
-                return annotated
+                return _content_and_artifact(annotated, result)
 
             if error is not None:
                 # Non-409 failures: surface as text so the model always gets tool_end.
-                create_results[tool_name] = text if is_create else text
-                return f"Error: {text}"
+                if is_create:
+                    create_results[tool_name] = text
+                return _content_and_artifact(f"Error: {text}")
 
             if is_create:
                 create_results[tool_name] = text
-            return result if result is not None else text
+            if result is not None:
+                return _content_and_artifact(text, result)
+            return _content_and_artifact(text)
 
     tool.coroutine = guarded_coroutine
     return tool
