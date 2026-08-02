@@ -12,6 +12,10 @@ _SKILLS_DIR = _ROOT / ".agents" / "skills"
 
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.S)
 
+# Keep skill bodies small: one full SDK guide can be 30k+ chars, and reloading
+# several of them in a single agent turn blows the model context window.
+DEFAULT_SKILL_MAX_CHARS = 5_000
+
 
 def skills_dir() -> Path:
     return _SKILLS_DIR
@@ -48,19 +52,40 @@ def skill_index_text() -> str:
     return "\n".join(lines)
 
 
-def load_skill(name: str, *, max_chars: int = 14000) -> str:
-    """Load a skill body (frontmatter stripped)."""
+def resolve_skill_key(name: str) -> str:
     key = (name or "").strip().lower()
-    if key in {"", "list", "all"}:
-        return skill_index_text()
-
-    # Accept bare language names: "typescript" → "appwrite-typescript"
+    if key in {"", "list", "all", "skills"}:
+        return "list"
     if not key.startswith("appwrite-"):
         key = f"appwrite-{key}"
-
     # Flutter shares the Dart SDK skill.
     if key in {"appwrite-flutter", "appwrite-flutter-sdk"}:
         key = "appwrite-dart"
+    return key
+
+
+def _truncate_markdown(body: str, max_chars: int) -> str:
+    if len(body) <= max_chars:
+        return body
+    cut = body[:max_chars]
+    for marker in ("\n## ", "\n### ", "\n# "):
+        idx = cut.rfind(marker)
+        if idx > max_chars // 3:
+            cut = cut[:idx]
+            break
+    return (
+        cut.rstrip()
+        + "\n\n…[skill truncated for context size; do not reload — "
+        + "use MCP for live project work, or browser_fetch a docs URL "
+        + "for a missing section]"
+    )
+
+
+def load_skill(name: str, *, max_chars: int = DEFAULT_SKILL_MAX_CHARS) -> str:
+    """Load a skill body (frontmatter stripped), truncated for model context."""
+    key = resolve_skill_key(name)
+    if key == "list":
+        return skill_index_text()
 
     path = skills_dir() / key / "SKILL.md"
     if not path.is_file():
@@ -70,7 +95,5 @@ def load_skill(name: str, *, max_chars: int = 14000) -> str:
     text = path.read_text(encoding="utf-8")
     m = _FRONTMATTER.match(text)
     body = text[m.end() :] if m else text
-    body = body.strip()
-    if len(body) > max_chars:
-        body = body[: max_chars - 1] + "…"
+    body = _truncate_markdown(body.strip(), max_chars)
     return f"# Skill: {key}\n\n{body}"

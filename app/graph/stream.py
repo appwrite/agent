@@ -20,10 +20,11 @@ from app.graph.builder import (
     _make_llm,
     _strip_tags,
 )
+from app.graph.title import generate_conversation_title
 from app.graph.tools import build_appwrite_tools, build_tools
 from app.mcp import get_mcp_manager
 from app.mcp.write_guard import begin_turn_write_guard
-from app.turn_context import set_turn_attachments
+from app.turn_context import begin_turn_skills, set_turn_attachments
 
 # MCP workflows often need search → call → retry; keep headroom above the
 # default react-agent budget so a few bad args do not end the turn early.
@@ -193,6 +194,7 @@ async def run_turn_stream(
     normalized = normalize_attachments(attachments)
     set_turn_attachments(normalized)
     begin_turn_write_guard()
+    begin_turn_skills()
 
     mcp = get_mcp_manager()
     mcp_tools, refreshed_creds = await mcp.tools_from_connections(mcp_connections)
@@ -237,6 +239,8 @@ async def run_turn_stream(
             yield {"type": "answer_start", "agent": "supervisor"}
             yield {"type": "token", "agent": "supervisor", "content": final_text}
         yield {"type": "done", "content": final_text, "answer": final_text}
+        async for event in _maybe_title_event(message, final_text, prior):
+            yield event
         return
 
     agent_map = {
@@ -292,3 +296,24 @@ async def run_turn_stream(
             yield event
 
     yield {"type": "done", "content": final_text, "answer": final_text}
+    async for event in _maybe_title_event(message, final_text, prior):
+        yield event
+
+
+async def _maybe_title_event(
+    user_message: str,
+    assistant_message: str,
+    prior: Sequence[BaseMessage],
+) -> AsyncIterator[dict[str, Any]]:
+    """On the first turn only, emit a model-generated topic title."""
+    if prior:
+        return
+    try:
+        title = await generate_conversation_title(
+            user_message=user_message,
+            assistant_message=assistant_message,
+        )
+    except Exception:  # noqa: BLE001
+        return
+    if title:
+        yield {"type": "conversation_title", "title": title}

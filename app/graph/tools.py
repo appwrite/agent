@@ -15,8 +15,12 @@ from langchain_core.tools import tool
 from app.attachments import text_from_bytes
 from app.config import get_settings
 from app.graph.browser import browser_fetch_text, host_of, web_search_results
-from app.graph.skills import load_skill, skill_index_text
-from app.turn_context import find_turn_attachment
+from app.graph.skills import load_skill, resolve_skill_key, skill_index_text
+from app.turn_context import (
+    find_turn_attachment,
+    mark_skill_loaded,
+    skill_already_loaded,
+)
 
 _OPS = {
     ast.Add: operator.add,
@@ -204,13 +208,23 @@ def appwrite_skill(
 ) -> str:
     """Load an installed Appwrite SDK/CLI skill guide (official agent-skills).
 
-    Call with name='list' first if unsure. Then load the matching language skill
-    before writing Appwrite code or CLI steps.
+    For live Cloud project actions (create users, databases, buckets, …) prefer
+    MCP tools — do not load skills. Load at most ONE language skill per turn
+    when you need code samples; never reload the same skill.
     """
-    key = (name or "").strip()
-    if not key or key.lower() in {"list", "all", "skills"}:
+    key = resolve_skill_key(name)
+    if key == "list":
         return skill_index_text()
-    return load_skill(key)
+    if skill_already_loaded(key):
+        return (
+            f"Skill {key!r} was already loaded earlier this turn. "
+            "Reuse that content — do not call appwrite_skill again for it. "
+            "For live project mutations use MCP tools (appwrite_search_tools → "
+            "appwrite_call_tool), not CLI/SDK skill guides."
+        )
+    content = load_skill(key)
+    mark_skill_loaded(key)
+    return content
 
 
 @tool

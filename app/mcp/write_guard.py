@@ -1,62 +1,49 @@
-"""Turn-scoped guards so MCP creates are not duplicated."""
+"""Per-turn MCP create dedupe + 409 recovery.
+
+State lives on the wrapped tool instance (closure), not ContextVars, so parallel
+LangGraph tool calls in the same turn share it. MCP/Appwrite errors are often
+raised as exceptions — those must be caught or recovery never runs.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import secrets
 import string
-from contextvars import ContextVar
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
 
-_ALPHABET = string.ascii_lowercase + string.digits
+logger = logging.getLogger(__name__)
 
-# Per-turn state (reset at the start of each /api/turn).
-_lock: ContextVar[asyncio.Lock | None] = ContextVar("mcp_write_lock", default=None)
-_unique_ids: ContextVar[dict[str, str] | None] = ContextVar(
-    "mcp_unique_ids", default=None
-)
-_create_attempts: ContextVar[dict[str, int] | None] = ContextVar(
-    "mcp_create_attempts", default=None
-)
-_create_results: ContextVar[dict[str, str] | None] = ContextVar(
-    "mcp_create_results", default=None
-)
+_ALPHABET = string.ascii_lowercase + string.digits
 
 _ALREADY_EXISTS_RE = re.compile(
     r"already_exists|already exists|code=409", re.IGNORECASE
 )
 _CREATE_TOOL_RE = re.compile(r"(?:^|_)create(?:_|$)")
+_ID_KEYS = (
+    "database_id",
+    "bucket_id",
+    "user_id",
+    "team_id",
+    "function_id",
+    "file_id",
+    "collection_id",
+    "table_id",
+    "row_id",
+    "document_id",
+)
 
 
 def begin_turn_write_guard() -> None:
-    """Call once at the start of each assistant turn."""
-    _lock.set(asyncio.Lock())
-    _unique_ids.set({})
-    _create_attempts.set({})
-    _create_results.set({})
-
-
-def _state() -> tuple[asyncio.Lock, dict[str, str], dict[str, int], dict[str, str]]:
-    lock = _lock.get()
-    ids = _unique_ids.get()
-    attempts = _create_attempts.get()
-    results = _create_results.get()
-    if lock is None or ids is None or attempts is None or results is None:
-        begin_turn_write_guard()
-        lock = _lock.get()
-        ids = _unique_ids.get()
-        attempts = _create_attempts.get()
-        results = _create_results.get()
-    assert lock is not None and ids is not None
-    assert attempts is not None and results is not None
-    return lock, ids, attempts, results
+    """Kept for stream.py compatibility; state is per wrapped tool instance."""
+    return
 
 
 def _generate_id(length: int = 20) -> str:
-    # Appwrite custom IDs: a-z A-Z 0-9 . - _; must not start with special char.
     return secrets.choice(string.ascii_lowercase) + "".join(
         secrets.choice(_ALPHABET) for _ in range(length - 1)
     )
@@ -97,16 +84,37 @@ def _is_create_tool(tool_name: str) -> bool:
     return bool(tool_name and _CREATE_TOOL_RE.search(tool_name))
 
 
-def _annotate_already_exists(text: str) -> str:
-    return (
-        f"{text.rstrip()}\n\n"
-        "The resource already exists. Treat this as success for the user's "
-        "request. Do NOT create again with unique() or another id — fetch/list "
-        "the existing resource and report it."
-    )
+def _get_tool_for_create(create_tool: str) -> str | None:
+    if create_tool.endswith("_create"):
+        return create_tool[: -len("_create")] + "_get"
+    match = re.match(r"^(.+)_create_(.+)$", create_tool)
+    if match:
+        return f"{match.group(1)}_get_{match.group(2)}"
+    return None
+
+
+def _id_from_arguments(arguments: Any) -> tuple[str, str] | None:
+    if not isinstance(arguments, dict):
+        return None
+    for key in _ID_KEYS:
+        value = arguments.get(key)
+        if isinstance(value, str) and value and value != "unique()":
+            return key, value
+    for key, value in arguments.items():
+        if (
+            isinstance(key, str)
+            and key.endswith("_id")
+            and isinstance(value, str)
+            and value
+            and value != "unique()"
+        ):
+            return key, value
+    return None
 
 
 def _as_text(result: Any) -> str:
+    if isinstance(result, BaseException):
+        return str(result)
     if isinstance(result, tuple) and result:
         content = result[0]
         if isinstance(content, list):
@@ -125,6 +133,53 @@ def _with_text(result: Any, text: str) -> Any:
     return text
 
 
+def _is_already_exists(text: str) -> bool:
+    return bool(_ALREADY_EXISTS_RE.search(text))
+
+
+async def _recover_existing(
+    original,
+    *,
+    payload: dict[str, Any],
+    create_tool: str,
+    arguments: Any,
+) -> str | None:
+    get_tool = _get_tool_for_create(create_tool)
+    id_pair = _id_from_arguments(arguments)
+    if not get_tool or not id_pair:
+        return None
+
+    id_key, id_value = id_pair
+    get_payload: dict[str, Any] = {
+        "tool_name": get_tool,
+        "arguments": {id_key: id_value},
+    }
+    for key in ("project_id", "projectId", "organization_id", "organizationId"):
+        if key in payload and payload[key] is not None:
+            get_payload[key] = payload[key]
+
+    try:
+        fetched = await original(**get_payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("409 recovery get failed for %s: %s", create_tool, exc)
+        return None
+
+    body = _as_text(fetched)
+    if not body.strip():
+        return None
+    lowered = body.lower()
+    if "request failed" in lowered and _is_already_exists(body):
+        return None
+    if lowered.startswith("error") and "ready" not in lowered:
+        return None
+
+    return (
+        "Create completed successfully. Resource is ready "
+        f"(id={id_value}).\n\n{body}\n\n"
+        "Report this as a successful create to the user. Do not create again."
+    )
+
+
 def wrap_mcp_tool(tool: BaseTool) -> BaseTool:
     """Attach error handling + create dedupe to an MCP-backed tool."""
     tool.handle_tool_error = True
@@ -135,40 +190,74 @@ def wrap_mcp_tool(tool: BaseTool) -> BaseTool:
     if original is None:
         return tool
 
+    # Per wrapped instance (== per turn, tools_from_connections rebuilds each turn).
+    lock = asyncio.Lock()
+    unique_ids: dict[str, str] = {}
+    create_attempts: dict[str, int] = {}
+    create_results: dict[str, str] = {}
+
     async def guarded_coroutine(**kwargs: Any) -> Any:
-        lock, ids, attempts, results = _state()
         payload = dict(kwargs)
         tool_name = _tool_name_from_payload(payload)
         is_create = _is_create_tool(tool_name)
 
         async with lock:
-            if is_create and attempts.get(tool_name, 0) >= 1:
-                previous = results.get(tool_name, "")
+            if is_create and create_attempts.get(tool_name, 0) >= 1:
+                previous = create_results.get(tool_name, "")
                 return (
-                    f"Blocked duplicate {tool_name} in this turn to avoid creating "
-                    f"multiple resources. Previous result:\n{previous}\n\n"
-                    "If that result was already_exists, fetch/list the existing "
-                    "resource and finish. Do not create again."
+                    f"Blocked duplicate {tool_name} in this turn.\n"
+                    f"Previous result:\n{previous}\n\n"
+                    "Use that result and finish. Do not create again."
                 )
 
             if "arguments" in payload:
                 payload["arguments"] = _expand_unique_in_obj(
-                    payload["arguments"], ids=ids
+                    payload["arguments"], ids=unique_ids
                 )
 
-            result = await original(**payload)
-            text = _as_text(result)
+            if is_create:
+                create_attempts[tool_name] = create_attempts.get(tool_name, 0) + 1
+
+            try:
+                result = await original(**payload)
+                text = _as_text(result)
+                error = None
+            except Exception as exc:  # noqa: BLE001
+                result = None
+                text = str(exc)
+                error = exc
+
+            if is_create and _is_already_exists(text):
+                recovered = await _recover_existing(
+                    original,
+                    payload=payload,
+                    create_tool=tool_name,
+                    arguments=payload.get("arguments"),
+                )
+                if recovered:
+                    create_results[tool_name] = recovered
+                    if result is not None:
+                        return _with_text(result, recovered)
+                    return recovered
+
+                annotated = (
+                    f"{text.rstrip()}\n\n"
+                    "The resource already exists (likely created by this request). "
+                    "Treat as success: list/get it and report it. Do NOT create again."
+                )
+                create_results[tool_name] = annotated
+                if result is not None:
+                    return _with_text(result, annotated)
+                return annotated
+
+            if error is not None:
+                # Non-409 failures: surface as text so the model always gets tool_end.
+                create_results[tool_name] = text if is_create else text
+                return f"Error: {text}"
 
             if is_create:
-                attempts[tool_name] = attempts.get(tool_name, 0) + 1
-                if _ALREADY_EXISTS_RE.search(text):
-                    text = _annotate_already_exists(text)
-                results[tool_name] = text
-                return _with_text(result, text)
-
-            if _ALREADY_EXISTS_RE.search(text):
-                return _with_text(result, _annotate_already_exists(text))
-            return result
+                create_results[tool_name] = text
+            return result if result is not None else text
 
     tool.coroutine = guarded_coroutine
     return tool

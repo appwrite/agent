@@ -7,18 +7,12 @@ from typing import Any
 
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from mcp.client.auth import OAuthClientProvider
-from mcp.shared.auth import OAuthClientMetadata
-from pydantic import AnyUrl
 
 from app.mcp.registry import McpServerDef, list_servers, resolve_server
 from app.mcp.storage import MemoryTokenStorage
 from app.mcp.write_guard import wrap_mcp_tool
 
 logger = logging.getLogger(__name__)
-
-# Placeholder redirect for token-refresh auth metadata only (no browser OAuth here).
-_PLACEHOLDER_REDIRECT = "http://127.0.0.1/oauth/callback"
 
 
 class McpManager:
@@ -35,46 +29,18 @@ class McpManager:
             for s in list_servers()
         ]
 
-    def _oauth_provider(
-        self,
-        server: McpServerDef,
-        *,
-        storage: MemoryTokenStorage,
-    ) -> OAuthClientProvider:
-        async def _no_redirect(url: str) -> None:
-            raise RuntimeError(
-                f"MCP server {server.id!r} needs re-authentication "
-                "(complete OAuth in the client)."
-            )
-
-        async def _no_callback() -> tuple[str, str | None]:
-            raise RuntimeError(
-                f"MCP server {server.id!r} needs re-authentication "
-                "(complete OAuth in the client)."
-            )
-
-        return OAuthClientProvider(
-            server_url=server.url,
-            client_metadata=OAuthClientMetadata(
-                client_name="Appwrite Assistant",
-                redirect_uris=[AnyUrl(_PLACEHOLDER_REDIRECT)],
-                grant_types=["authorization_code", "refresh_token"],
-                response_types=["code"],
-            ),
-            storage=storage,
-            redirect_handler=_no_redirect,
-            callback_handler=_no_callback,
-        )
-
     async def _list_tools_for(
-        self, server: McpServerDef, auth: OAuthClientProvider
+        self, server: McpServerDef, *, access_token: str
     ) -> list[BaseTool]:
+        # Static Bearer only — never OAuthClientProvider. mcp<=1.13.x's
+        # async_auth_flow always re-yields the request (even on 200), so one
+        # tools/call becomes two Appwrite writes (201 then 409).
         client = MultiServerMCPClient(
             {
                 server.id: {
                     "url": server.url,
                     "transport": "streamable_http",
-                    "auth": auth,
+                    "headers": {"Authorization": f"Bearer {access_token}"},
                 }
             }
         )
@@ -105,12 +71,14 @@ class McpManager:
                 tokens=conn.get("tokens"),
                 client_info=conn.get("client_info"),
             )
-            if not storage.has_tokens():
+            access_token = storage.access_token()
+            if not access_token:
                 continue
 
-            auth = self._oauth_provider(server, storage=storage)
             try:
-                loaded = await self._list_tools_for(server, auth)
+                loaded = await self._list_tools_for(
+                    server, access_token=access_token
+                )
                 # Error→ToolMessage + turn-scoped create dedupe (see write_guard).
                 tools.extend(wrap_mcp_tool(tool) for tool in loaded)
                 exported = storage.export()

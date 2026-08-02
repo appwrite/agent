@@ -60,6 +60,11 @@ class MemoryTokenStorage:
     def has_tokens(self) -> bool:
         return bool(self._tokens and self._tokens.access_token)
 
+    def access_token(self) -> str | None:
+        if not self._tokens or not self._tokens.access_token:
+            return None
+        return self._tokens.access_token
+
     def export(self) -> dict[str, Any]:
         return {
             "tokens": self._tokens.model_dump(mode="json") if self._tokens else None,

@@ -109,6 +109,27 @@ async def meta():
     return agent_settings_snapshot()
 
 
+class TitleRequest(BaseModel):
+    message: str = Field(..., min_length=1)
+    assistant_message: str = ""
+
+
+@router.post("/api/title", dependencies=[Depends(require_session_key)])
+async def title(body: TitleRequest):
+    """Generate a short topic title for a conversation opener."""
+    if not get_settings().llm_api_key:
+        raise HTTPException(status_code=503, detail="LLM_API_KEY is not configured")
+    from app.graph.title import generate_conversation_title
+
+    generated = await generate_conversation_title(
+        user_message=body.message,
+        assistant_message=body.assistant_message,
+    )
+    if not generated:
+        raise HTTPException(status_code=422, detail="Could not generate a title")
+    return {"title": generated}
+
+
 @router.post("/api/turn", dependencies=[Depends(require_session_key)])
 async def turn(body: TurnRequest):
     """Run one turn and stream SSE events. Stateless — context comes from the body."""
