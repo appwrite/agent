@@ -43,6 +43,15 @@ class McpConnection(BaseModel):
     client_info: dict[str, Any] | None = None
 
 
+class LlmOverride(BaseModel):
+    """Per-turn model credential. Never logged — carries a live provider API key."""
+
+    api_key: str | None = None
+    model: str | None = None
+    base_url: str | None = None
+    temperature: float | None = None
+
+
 class TurnRequest(BaseModel):
     """One agent turn. Proxy/UI owns persistence; the engine keeps nothing."""
 
@@ -50,6 +59,7 @@ class TurnRequest(BaseModel):
     history: list[HistoryMessage] = Field(default_factory=list)
     attachments: list[InlineAttachment] = Field(default_factory=list)
     mcp_connections: list[McpConnection] = Field(default_factory=list)
+    llm: LlmOverride | None = None
 
     @model_validator(mode="after")
     def require_message_or_attachments(self) -> TurnRequest:
@@ -76,6 +86,7 @@ async def _stream_turn(body: TurnRequest) -> AsyncIterator[str]:
             mcp_connections=[
                 c.model_dump(exclude_none=True) for c in body.mcp_connections
             ],
+            llm_override=body.llm.model_dump(exclude_none=True) if body.llm else None,
         ):
             yield _sse(event)
     except ValueError as exc:
@@ -133,7 +144,8 @@ async def title(body: TitleRequest):
 @router.post("/api/turn", dependencies=[Depends(require_session_key)])
 async def turn(body: TurnRequest):
     """Run one turn and stream SSE events. Stateless — context comes from the body."""
-    if not get_settings().llm_api_key:
+    has_llm = get_settings().llm_api_key or (body.llm and body.llm.api_key)
+    if not has_llm:
         raise HTTPException(status_code=503, detail="LLM_API_KEY is not configured")
     return StreamingResponse(
         _stream_turn(body),

@@ -56,9 +56,12 @@ docker build \
 | Method | Path | Notes |
 |--------|------|-------|
 | GET | `/health` | Liveness |
-| GET | `/ready` | LLM configured? |
-| GET | `/api/meta` | Auth — runtime inspection |
+| GET | `/ready` | Env `LLM_API_KEY` present? |
+| GET | `/api/meta` | Auth — runtime inspection (secrets masked) |
+| POST | `/api/title` | Auth — short topic title for a conversation opener |
 | POST | `/api/turn` | Auth — one turn (SSE) |
+
+`POST /api/turn` requires either env `LLM_API_KEY` or a per-turn `llm.api_key`. `/ready` only checks the env default.
 
 ### Turn request
 
@@ -80,11 +83,35 @@ docker build \
       "tokens": { "access_token": "...", "refresh_token": "..." },
       "client_info": { "client_id": "..." }
     }
-  ]
+  ],
+  "llm": {
+    "api_key": "...",
+    "model": "openai/gpt-4o",
+    "base_url": "https://api.openai.com/v1",
+    "temperature": 0.2
+  }
 }
 ```
 
-SSE events include `route`, `subagent_*`, `tool_*`, `token`, `mcp_credentials` (refreshed tokens for the client to store), `done`, `complete`.
+| Field | Required | Notes |
+|-------|----------|-------|
+| `message` | one of message / attachments | User text for this turn |
+| `history` | no | Prior `{role, content}` pairs (trimmed server-side) |
+| `attachments` | no | Inline files via `content_base64` |
+| `mcp_connections` | no | Full MCP URL + tokens + `client_info` for this turn |
+| `llm` | no | Per-turn credential/model override (see below) |
+
+**`llm` override.** Optional object merged over env `LLM_*` for this turn only. Omitted fields keep the env defaults. Cloud uses this when a conversation selects a user-owned model (`assistantModels`); omit it to use the shared Appwrite default. The key is never logged.
+
+### Title request
+
+```json
+{ "message": "How do I create a database?", "assistant_message": "..." }
+```
+
+Returns `{ "title": "..." }`. Uses the env LLM only (no per-turn `llm` override).
+
+SSE events from `/api/turn` include `route`, `subagent_*`, `tool_*`, `token`, `mcp_credentials` (refreshed tokens for the client to store), `done`, `complete`.
 
 ## MCP OAuth (client-owned)
 
@@ -103,9 +130,9 @@ Production Appwrite should own steps 1–4 and replay credentials on each turn t
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `ASSISTANT_API_KEY` | yes (prod) | Clients send `X-Session-API-Key` |
-| `LLM_API_KEY` | yes | Model provider API key |
-| `LLM_MODEL` | no | Default `openai/gpt-4o` |
-| `LLM_BASE_URL` | no | Optional OpenAI-compatible base URL |
+| `LLM_API_KEY` | yes* | Default model provider API key (`*` or supply `llm.api_key` per turn) |
+| `LLM_MODEL` | no | Default `openai/gpt-4o` (overridable via `llm.model`) |
+| `LLM_BASE_URL` | no | Optional OpenAI-compatible base URL (overridable via `llm.base_url`) |
 | `WEB_SEARCH_ENABLED` | no | Headless browser web search (default `true`) |
 | `ATTACHMENTS_MAX_BYTES` | no | Max inline attachment size (default 10MB) |
 

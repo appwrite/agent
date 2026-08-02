@@ -138,16 +138,29 @@ Return a concise result the supervisor can finish with.
 """
 
 
-def _make_llm(settings: Settings) -> ChatOpenAI:
-    if not settings.llm_api_key:
+def _make_llm(settings: Settings, override: dict | None = None) -> ChatOpenAI:
+    """Build the chat model. `override` (api_key/model/base_url/temperature)
+    lets a single turn pin its own credential instead of the env defaults —
+    only non-empty override fields win, everything else falls back to
+    `settings`. Never log `override`: it may carry a live provider API key.
+    """
+    override = override or {}
+
+    api_key = override.get("api_key") or settings.llm_api_key
+    if not api_key:
         raise RuntimeError("LLM_API_KEY is required")
+
+    temperature = override.get("temperature")
     kwargs: dict = {
-        "model": settings.chat_model,
-        "api_key": settings.llm_api_key,
-        "temperature": 0.2,
+        "model": override.get("model") or settings.chat_model,
+        "api_key": api_key,
+        "temperature": 0.2 if temperature is None else temperature,
     }
-    if settings.llm_base_url:
-        kwargs["base_url"] = settings.llm_base_url
+
+    base_url = override.get("base_url") or settings.llm_base_url
+    if base_url:
+        kwargs["base_url"] = base_url
+
     return ChatOpenAI(**kwargs)
 
 

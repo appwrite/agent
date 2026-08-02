@@ -188,10 +188,15 @@ async def run_turn_stream(
     history: Sequence[dict[str, Any]] | None = None,
     attachments: Sequence[dict[str, Any]] | None = None,
     mcp_connections: Sequence[dict[str, Any]] | None = None,
+    llm_override: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
-    """Run one agent turn. All conversation / MCP / file context comes from the request."""
+    """Run one agent turn. All conversation / MCP / file context comes from the request.
+
+    `llm_override` (api_key/model/base_url/temperature) pins this turn to a
+    user-selected model instead of the engine's env-configured default.
+    """
     settings = get_settings()
-    llm = _make_llm(settings)
+    llm = _make_llm(settings, llm_override)
     normalized = normalize_attachments(attachments)
     set_turn_attachments(normalized)
     begin_turn_write_guard()
