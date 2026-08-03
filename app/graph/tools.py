@@ -15,6 +15,7 @@ from langchain_core.tools import tool
 from app.attachments import text_from_bytes
 from app.config import get_settings
 from app.graph.browser import browser_fetch_text, host_of, web_search_results
+from app.graph.console import ConsoleProtocolError, emit_console_actions
 from app.graph.skills import load_skill, resolve_skill_key, skill_index_text
 from app.turn_context import (
     find_turn_attachment,
@@ -270,6 +271,38 @@ def sandbox_exec(
     )
 
 
+@tool
+def console(
+    actions: Annotated[
+        str,
+        "JSON array (or single object) of ConsoleAction envelopes for the "
+        "Appwrite Console UI. Each object needs a `type` plus type-specific "
+        "fields. Types: set_theme, navigate, open_create, open_dialog, toast, "
+        "show_pane, toggle_terminal, scroll_to_card, resource, resource_list, "
+        "refresh. "
+        "Examples: "
+        '[{"type":"set_theme","theme":"dark"}] or '
+        '[{"type":"resource_list","resourceType":"database","items":['
+        '{"resourceId":"main","title":"Main","href":"/project/x/databases/main"}]}] or '
+        '[{"type":"resource","mutation":"create","resourceType":"database",'
+        '"resourceId":"db1","title":"Main DB"}]. '
+        "Full contract: docs/console-protocol.md (protocol appwrite.console/v1).",
+    ],
+) -> str:
+    """Post UI metadata to the Appwrite Console (theme, nav, lists, resource cards).
+
+    Does NOT create/update/delete Appwrite resources — use MCP for that, then call
+    console with type=resource so the Console can render a card. For list/query
+    results (databases, users, buckets, …) use type=resource_list — never dump the
+    list as markdown. Unknown action types are rejected. The tool result is the
+    canonical JSON envelope the Console parses from the tool_end output.
+    """
+    try:
+        return emit_console_actions(actions)
+    except ConsoleProtocolError as exc:
+        return f"Error: invalid console actions — {exc}"
+
+
 def build_tools() -> list:
     return [
         calculator,
@@ -279,6 +312,7 @@ def build_tools() -> list:
         appwrite_skill,
         read_attachment,
         sandbox_exec,
+        console,
     ]
 
 
@@ -292,4 +326,5 @@ def build_appwrite_tools() -> list:
         calculator,
         read_attachment,
         sandbox_exec,
+        console,
     ]

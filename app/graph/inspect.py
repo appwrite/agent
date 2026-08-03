@@ -119,7 +119,7 @@ def agent_settings_snapshot() -> dict[str, Any]:
             },
             {
                 "name": "worker",
-                "role": "Plans, structured answers, sandbox_exec stub",
+                "role": "Plans, structured answers, console UI actions, sandbox_exec stub",
                 "prompt": WORKER_PROMPT.strip(),
             },
         ],
@@ -131,5 +131,10 @@ def agent_settings_snapshot() -> dict[str, Any]:
             "PORT": str(settings.port),
             "LLM_API_KEY": "••••••" if settings.llm_api_key else "",
             "ASSISTANT_API_KEY": "••••••" if settings.assistant_api_key else "",
+        },
+        "console_protocol": {
+            "id": "appwrite.console/v1",
+            "tool": "console",
+            "doc": "docs/console-protocol.md",
         },
     }
