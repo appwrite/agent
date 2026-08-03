@@ -7,7 +7,6 @@ from typing import Any
 from app.config import get_settings
 from app.graph.builder import (
     APPWRITE_EXPERT_PROMPT,
-    MAX_HANDOFFS,
     RESEARCHER_PROMPT,
     SUPERVISOR_PROMPT,
     WORKER_PROMPT,
@@ -93,17 +92,19 @@ def agent_settings_snapshot() -> dict[str, Any]:
             "suggested_servers": get_mcp_manager().suggested_servers(),
         },
         "runtime": {
-            "max_handoffs": MAX_HANDOFFS,
             "subagent_recursion_limit": SUBAGENT_RECURSION_LIMIT,
             "history_window": HISTORY_WINDOW,
-            "graph": "supervisor → researcher | appwrite | worker → FINISH",
+            "graph": (
+                "route once → researcher | appwrite | worker | FINISH "
+                "(worker fallback if primary stalls)"
+            ),
         },
         "tools": tools,
         "appwrite_tools": aw_tools,
         "agents": [
             {
                 "name": "supervisor",
-                "role": "Routes work and produces the final user-facing answer",
+                "role": "Routes each turn once to a subagent (or FINISH)",
                 "prompt": SUPERVISOR_PROMPT.strip(),
             },
             {

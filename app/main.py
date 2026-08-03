@@ -6,10 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.build_info import BUILD_ID, BUILD_TIME, as_dict
-from app.config import get_settings
 
 logger = logging.getLogger("uvicorn.error")
-settings = get_settings()
 
 
 @asynccontextmanager

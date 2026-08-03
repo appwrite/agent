@@ -16,8 +16,6 @@ services:
       LLM_MODEL: ${LLM_MODEL:-openai/gpt-5.6}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       WEB_SEARCH_ENABLED: ${WEB_SEARCH_ENABLED:-true}
-      MCP_OAUTH_REDIRECT_BASE: ${MCP_OAUTH_REDIRECT_BASE:-http://localhost:3001}
-      MCP_OAUTH_CLIENT_NAME: ${MCP_OAUTH_CLIENT_NAME:-Appwrite Assistant}
       ASSISTANT_BUILD_ID: ${ASSISTANT_BUILD_ID:-local}
       ASSISTANT_BUILD_TIME: ${ASSISTANT_BUILD_TIME:-unknown}
     healthcheck:

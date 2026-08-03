@@ -1,31 +1,16 @@
-"""LangGraph multi-agent: supervisor + researcher + appwrite + worker."""
+"""Agent prompts, routing schema, and LLM factory for the turn runner."""
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, TypedDict
+from typing import Literal
 
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_openai import ChatOpenAI
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, START, StateGraph
-from langgraph.graph.message import add_messages
-from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
-from app.config import Settings, get_settings
-from app.graph.skills import skill_index_text
+from app.config import Settings
 from app.graph.content import content_to_text
-from app.graph.tools import build_appwrite_tools, build_tools
-
-_graph = None
-MAX_HANDOFFS = 2
-AGENTS = ("researcher", "appwrite", "worker")
-
-
-class AgentState(TypedDict):
-    messages: Annotated[list[BaseMessage], add_messages]
-    next: str
-    handoffs: int
+from app.graph.skills import skill_index_text
 
 
 class Route(BaseModel):
@@ -204,110 +189,3 @@ def _strip_tags(text: str) -> str:
         if text.startswith(prefix):
             text = text[len(prefix) :]
     return text
-
-
-def build_graph(settings: Settings | None = None):
-    settings = settings or get_settings()
-    llm = _make_llm(settings)
-    tools = build_tools()
-    aw_tools = build_appwrite_tools()
-
-    researcher = create_react_agent(llm, tools, prompt=RESEARCHER_PROMPT)
-    appwrite = create_react_agent(llm, aw_tools, prompt=APPWRITE_EXPERT_PROMPT)
-    worker = create_react_agent(llm, tools, prompt=WORKER_PROMPT)
-
-    supervisor_llm = llm.with_structured_output(Route)
-
-    def supervisor_node(state: AgentState) -> dict:
-        handoffs = int(state.get("handoffs") or 0)
-        if handoffs >= MAX_HANDOFFS:
-            fallback = _strip_tags(
-                _last_ai_text(state["messages"]) or "I could not complete the request."
-            )
-            return {
-                "next": "FINISH",
-                "messages": [AIMessage(content=fallback)],
-            }
-
-        msgs = [SystemMessage(content=SUPERVISOR_PROMPT), *state["messages"]]
-        if handoffs > 0:
-            msgs.append(
-                SystemMessage(
-                    content=(
-                        f"Handoffs so far: {handoffs}/{MAX_HANDOFFS}. "
-                        "If a subagent already answered, choose FINISH now."
-                    )
-                )
-            )
-
-        route: Route = supervisor_llm.invoke(msgs)
-        if route.next == "FINISH" or handoffs > 0:
-            answer = route.final_answer or _last_ai_text(state["messages"]) or "Done."
-            return {"next": "FINISH", "messages": [AIMessage(content=_strip_tags(answer))]}
-        return {"next": route.next}
-
-    def _call_agent(agent, tag: str, state: AgentState, recursion: int) -> dict:
-        result = agent.invoke(
-            {"messages": state["messages"]},
-            config={"recursion_limit": recursion},
-        )
-        last = result["messages"][-1]
-        content = content_to_text(last.content)
-        return {
-            "messages": [AIMessage(content=f"[{tag}] {content}")],
-            "handoffs": int(state.get("handoffs") or 0) + 1,
-        }
-
-    def call_researcher(state: AgentState) -> dict:
-        return _call_agent(researcher, "researcher", state, 14)
-
-    def call_appwrite(state: AgentState) -> dict:
-        return _call_agent(appwrite, "appwrite", state, 40)
-
-    def call_worker(state: AgentState) -> dict:
-        return _call_agent(worker, "worker", state, 10)
-
-    def route_next(
-        state: AgentState,
-    ) -> Literal["researcher", "appwrite", "worker", "__end__"]:
-        nxt = state.get("next", "FINISH")
-        if nxt == "FINISH":
-            return "__end__"
-        if nxt in AGENTS:
-            return nxt  # type: ignore[return-value]
-        return "__end__"
-
-    graph = StateGraph(AgentState)
-    graph.add_node("supervisor", supervisor_node)
-    graph.add_node("researcher", call_researcher)
-    graph.add_node("appwrite", call_appwrite)
-    graph.add_node("worker", call_worker)
-
-    graph.add_edge(START, "supervisor")
-    graph.add_conditional_edges(
-        "supervisor",
-        route_next,
-        {
-            "researcher": "researcher",
-            "appwrite": "appwrite",
-            "worker": "worker",
-            "__end__": END,
-        },
-    )
-    graph.add_edge("researcher", "supervisor")
-    graph.add_edge("appwrite", "supervisor")
-    graph.add_edge("worker", "supervisor")
-
-    return graph.compile(checkpointer=MemorySaver())
-
-
-def get_graph():
-    global _graph
-    if _graph is None:
-        _graph = build_graph()
-    return _graph
-
-
-def reset_graph() -> None:
-    global _graph
-    _graph = None

@@ -506,9 +506,6 @@ export function AgentSettingsSheet({
 
                 <Section title="Runtime">
                   <Row label="Graph">{settings.runtime.graph}</Row>
-                  <Row label="Max handoffs">
-                    {settings.runtime.max_handoffs}
-                  </Row>
                   <Row label="Subagent steps">
                     {settings.runtime.subagent_recursion_limit}
                   </Row>

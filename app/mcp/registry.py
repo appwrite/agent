@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 
@@ -71,7 +71,3 @@ def resolve_server(
         description=description or (builtin.description if builtin else ""),
         builtin=bool(builtin and cleaned_url == builtin.url),
     )
-
-
-def server_public_dict(server: McpServerDef) -> dict:
-    return asdict(server)

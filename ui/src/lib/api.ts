@@ -90,7 +90,6 @@ export type AgentSettings = {
     servers?: McpServerStatus[]
   }
   runtime: {
-    max_handoffs: number
     subagent_recursion_limit: number
     history_window: number
     graph: string
