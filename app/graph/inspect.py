@@ -6,10 +6,10 @@ from typing import Any
 
 from app.config import get_settings
 from app.graph.builder import (
-    APPWRITE_EXPERT_PROMPT,
+    PLANNER_PROMPT,
+    PLATFORM_PROMPT,
     RESEARCHER_PROMPT,
     SUPERVISOR_PROMPT,
-    WORKER_PROMPT,
     _model_allows_custom_temperature,
 )
 from app.graph.browser import CACHE_TTL_S
@@ -95,8 +95,8 @@ def agent_settings_snapshot() -> dict[str, Any]:
             "subagent_recursion_limit": SUBAGENT_RECURSION_LIMIT,
             "history_window": HISTORY_WINDOW,
             "graph": (
-                "route once → researcher | appwrite | worker | FINISH "
-                "(worker fallback if primary stalls)"
+                "route once → researcher | platform | planner | FINISH "
+                "(planner fallback if primary stalls)"
             ),
         },
         "tools": tools,
@@ -108,9 +108,9 @@ def agent_settings_snapshot() -> dict[str, Any]:
                 "prompt": SUPERVISOR_PROMPT.strip(),
             },
             {
-                "name": "appwrite",
-                "role": "Appwrite expert — SDKs, CLI, Cloud (loads installed skills)",
-                "prompt": APPWRITE_EXPERT_PROMPT.strip(),
+                "name": "platform",
+                "role": "Product specialist — SDKs, CLI, Cloud (loads installed skills)",
+                "prompt": PLATFORM_PROMPT.strip(),
             },
             {
                 "name": "researcher",
@@ -118,9 +118,9 @@ def agent_settings_snapshot() -> dict[str, Any]:
                 "prompt": RESEARCHER_PROMPT.strip(),
             },
             {
-                "name": "worker",
-                "role": "Plans, structured answers, console UI actions, sandbox_exec stub",
-                "prompt": WORKER_PROMPT.strip(),
+                "name": "planner",
+                "role": "Plans, structured answers, console UI actions, sandbox_exec stub; fallback if primary stalls",
+                "prompt": PLANNER_PROMPT.strip(),
             },
         ],
         "env": {

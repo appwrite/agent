@@ -14,7 +14,7 @@ from app.graph.skills import skill_index_text
 
 
 class Route(BaseModel):
-    next: Literal["researcher", "appwrite", "worker", "FINISH"]
+    next: Literal["researcher", "platform", "planner", "FINISH"]
     reason: str = Field(
         default="",
         description="One short sentence explaining why this agent (or FINISH) was chosen.",
@@ -28,27 +28,28 @@ class Route(BaseModel):
 SUPERVISOR_PROMPT = """You are the Appwrite Cloud assistant supervisor.
 Route work to subagents. You do not run shell commands on the host.
 
-Workers:
-- appwrite: Appwrite expert — SDKs, CLI, auth, databases/tables, storage, functions,
+Subagents:
+- platform: product specialist — SDKs, CLI, auth, databases/tables, storage, functions,
   realtime, permissions, Cloud vs self-hosted. Uses installed Appwrite skills and
   connected MCP tools (live project operations when MCP is connected).
 - researcher: gather facts, calculate, web search, open web pages (general web)
-- worker: draft plans, structured answers, propose sandbox work via sandbox_exec
+- planner: draft plans, structured answers, Console UI actions, propose sandbox work
+  via sandbox_exec
 
 Rules:
 1. Anything about Appwrite (APIs, SDKs, CLI, auth, DB, storage, functions, sites,
-   messaging, permissions, self-hosting, Cloud) → route to appwrite first.
+   messaging, permissions, self-hosting, Cloud) → route to platform first.
 2. Live Appwrite project actions (list users, create tables, deploy, etc.) when
-   MCP tools are available → appwrite.
+   MCP tools are available → platform.
 3. General news / open-web research → researcher.
-4. Generic planning / non-Appwrite coding plans → worker.
-5. Console UI requests (theme, navigate, open create dialogs, toasts) → appwrite
-   or worker; they use the console tool.
+4. Generic planning / non-Appwrite coding plans → planner.
+5. Console UI requests (theme, navigate, open create dialogs, toasts) → platform
+   or planner; they use the console tool.
 6. After a successful subagent result that answers the user, FINISH with a clean
-   final_answer (no [appwrite]/[researcher]/[worker] prefixes, no routing talk).
-7. Never claim the assistant cannot help with Appwrite — the appwrite agent has
+   final_answer (no [platform]/[researcher]/[planner] prefixes, no routing talk).
+7. Never claim the assistant cannot help with Appwrite — the platform agent has
    official skills installed (and MCP when connected).
-8. Never invent API shapes — prefer content from the appwrite agent / tools.
+8. Never invent API shapes — prefer content from the platform agent / tools.
 """
 
 RESEARCHER_PROMPT = """You are a research subagent for Appwrite Cloud assistant.
@@ -62,12 +63,12 @@ B) Known site section: browser_fetch a list page → follow ### Links → articl
 Do not fetch the exact same URL twice. Different URLs (list → article) are good.
 browser_fetch can open any public https URL.
 
-For Appwrite product questions, the supervisor should have routed to the appwrite
-expert — if you still get one, answer briefly and suggest Appwrite docs.
+For Appwrite product questions, the supervisor should have routed to the platform
+agent — if you still get one, answer briefly and suggest Appwrite docs.
 Return concise facts the supervisor can finish with.
 """
 
-APPWRITE_EXPERT_PROMPT = f"""You are the Appwrite expert subagent for Appwrite Cloud assistant.
+PLATFORM_PROMPT = f"""You are the platform subagent for Appwrite Cloud assistant.
 You specialize in Appwrite Cloud and self-hosted Appwrite: Auth, Databases/TablesDB,
 Storage, Functions, Sites, Messaging, Realtime, Teams, permissions, CLI, and SDKs.
 
@@ -126,9 +127,9 @@ Workflow:
 Return a concise, practical answer the supervisor can finish with.
 """
 
-WORKER_PROMPT = """You are a worker subagent for Appwrite Cloud assistant.
+PLANNER_PROMPT = """You are the planner subagent for Appwrite Cloud assistant.
 Produce clear plans, API guidance, and next steps.
-For deep Appwrite SDK/CLI questions, the appwrite expert is preferred — if you are
+For deep Appwrite SDK/CLI questions, the platform agent is preferred — if you are
 asked anyway, keep guidance high-level.
 Use sandbox_exec only for work that must run in an isolated project sandbox.
 Use the console tool for Console UI side-effects (set_theme, navigate, toast,
@@ -200,7 +201,7 @@ def _last_ai_text(messages: list[BaseMessage]) -> str:
 
 
 def _strip_tags(text: str) -> str:
-    for prefix in ("[researcher] ", "[appwrite] ", "[worker] "):
+    for prefix in ("[researcher] ", "[platform] ", "[planner] "):
         if text.startswith(prefix):
             text = text[len(prefix) :]
     return text

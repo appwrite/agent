@@ -877,7 +877,7 @@ export function ChatApp() {
                   {conversationId ? "Conversation" : "New conversation"}
                 </span>
                 <span className="truncate text-xs text-muted-foreground">
-                  Supervisor · appwrite · researcher · worker
+                  Supervisor · platform · researcher · planner
                 </span>
               </div>
             </div>

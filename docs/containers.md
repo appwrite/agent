@@ -8,7 +8,7 @@ Shared long-running assistant engine for Cloud `/v1/assistant`. Cloud keeps HTTP
 - Auth via `ASSISTANT_API_KEY` → header `X-Session-API-Key`.
 - Local UI proxies `/api` to the engine (`:3001`). Not for Cloud ingress.
 - **Stateless:** conversations, attachments, and MCP tokens are supplied per `POST /api/turn`. No durable volumes. **No MCP OAuth on the engine.**
-- Each turn routes once to `appwrite` / `researcher` / `worker` (or `FINISH`), with an optional worker fallback if the primary agent stalls.
+- Each turn routes once to `platform` / `researcher` / `planner` (or `FINISH`), with an optional planner fallback if the primary agent stalls.
 
 ## Proxy contract
 

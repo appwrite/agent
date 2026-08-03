@@ -511,5 +511,5 @@ User: “List my databases.”
 |-------|----------|
 | Validator + envelope | `app/graph/console.py` |
 | LangChain tool | `app/graph/tools.py` → `console` |
-| Agents with the tool | researcher, worker, appwrite (`build_tools` / `build_appwrite_tools`) |
+| Agents with the tool | researcher, planner, platform (`build_tools` / `build_appwrite_tools`) |
 | Protocol id constant | `PROTOCOL = "appwrite.console/v1"` |

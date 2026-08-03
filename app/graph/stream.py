@@ -11,10 +11,10 @@ from langgraph.prebuilt import create_react_agent
 from app.attachments import build_human_content, normalize_attachments
 from app.config import get_settings
 from app.graph.builder import (
-    APPWRITE_EXPERT_PROMPT,
+    PLANNER_PROMPT,
+    PLATFORM_PROMPT,
     RESEARCHER_PROMPT,
     SUPERVISOR_PROMPT,
-    WORKER_PROMPT,
     Route,
     _last_ai_text,
     _make_llm,
@@ -160,7 +160,7 @@ async def _stream_subagent(
 
         elif kind == "on_tool_error":
             # Unhandled tool exceptions skip on_tool_end; surface them so the
-            # UI/worker do not leave the call stuck in "running".
+            # UI/client do not leave the call stuck in "running".
             err = data.get("error")
             detail = _preview(err, tool_output_limit) or "Tool execution failed"
             yield {
@@ -222,12 +222,12 @@ async def run_turn_stream(
         }
 
     tools = [*build_tools(), *mcp_tools]
-    appwrite_tools = [*build_appwrite_tools(), *mcp_tools]
+    platform_tools = [*build_appwrite_tools(), *mcp_tools]
 
     router = llm.with_structured_output(Route)
     researcher = create_react_agent(llm, tools=tools, prompt=RESEARCHER_PROMPT)
-    worker = create_react_agent(llm, tools=tools, prompt=WORKER_PROMPT)
-    appwrite = create_react_agent(llm, tools=appwrite_tools, prompt=APPWRITE_EXPERT_PROMPT)
+    planner = create_react_agent(llm, tools=tools, prompt=PLANNER_PROMPT)
+    platform = create_react_agent(llm, tools=platform_tools, prompt=PLATFORM_PROMPT)
 
     prior = _history_messages(history)
     human = HumanMessage(content=build_human_content(message, normalized))
@@ -262,8 +262,8 @@ async def run_turn_stream(
 
     agent_map = {
         "researcher": researcher,
-        "worker": worker,
-        "appwrite": appwrite,
+        "planner": planner,
+        "platform": platform,
     }
     agent = agent_map.get(next_agent)
     if agent is None:
@@ -283,18 +283,18 @@ async def run_turn_stream(
         yield event
 
     if (
-        next_agent in {"researcher", "appwrite"}
+        next_agent in {"researcher", "platform"}
         and final_text
         and _looks_like_failure(final_text)
     ):
         yield {
             "type": "status",
-            "message": "Primary agent stalled — falling back to worker…",
+            "message": "Primary agent stalled — falling back to planner…",
         }
         yield {
             "type": "route",
-            "agent": "worker",
-            "next": "worker",
+            "agent": "planner",
+            "next": "planner",
             "reason": f"Fallback after {next_agent} could not complete the task",
         }
         fallback_messages = [
@@ -306,7 +306,7 @@ async def run_turn_stream(
             ),
             *conversation,
         ]
-        async for event in _stream_subagent(worker, "worker", fallback_messages):
+        async for event in _stream_subagent(planner, "planner", fallback_messages):
             if event.get("type") == "final":
                 final_text = str(event.get("content") or "")
                 continue

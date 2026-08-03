@@ -6,8 +6,8 @@ POC assistant engine for Appwrite Cloud `/v1/assistant`, built on [LangGraph](ht
 
 ## What you get
 
-- **One-shot router + subagents** (`appwrite`, `researcher`, `worker`) via LangGraph `create_react_agent` — each turn routes once (with an optional worker fallback if the primary agent stalls)
-- **Appwrite expert** with official [agent-skills](https://github.com/appwrite/agent-skills) vendored under `.agents/skills/`
+- **One-shot router + subagents** (`platform`, `researcher`, `planner`) via LangGraph `create_react_agent` — each turn routes once (with an optional planner fallback if the primary agent stalls)
+- **Platform agent** with official [agent-skills](https://github.com/appwrite/agent-skills) vendored under `.agents/skills/`
 - **Safe tools by default** — no host shell for the model
 - Tools: `calculator`, `current_time`, `web_search`, `browser_fetch`, `appwrite_skill`, `sandbox_exec` stub, **`console`** (Console UI protocol), plus MCP tools from credentials on the turn
 - FastAPI + shadcn chat UI
@@ -23,36 +23,36 @@ flowchart TD
   prep["Build tools<br/>built-ins + MCP write-guard wrappers"]
   route["Supervisor router<br/>structured Route: next + reason"]
   finish["FINISH<br/>emit final_answer"]
-  aw["appwrite ReAct agent"]
+  plat["platform ReAct agent"]
   res["researcher ReAct agent"]
-  wrk["worker ReAct agent"]
-  fallback{"Primary stalled?<br/>researcher / appwrite only"}
+  plan["planner ReAct agent"]
+  fallback{"Primary stalled?<br/>researcher / platform only"}
   done["SSE done · optional conversation_title"]
 
   req --> prep --> route
   route -->|FINISH| finish --> done
-  route -->|appwrite| aw
+  route -->|platform| plat
   route -->|researcher| res
-  route -->|worker| wrk
-  aw --> fallback
+  route -->|planner| plan
+  plat --> fallback
   res --> fallback
-  wrk --> done
-  fallback -->|yes| wrk
+  plan --> done
+  fallback -->|yes| plan
   fallback -->|no| done
 ```
 
-| Role | When it runs | Tools |
-|------|--------------|-------|
-| **Supervisor** | Every turn (routing only; may answer directly via `FINISH`) | None — structured `Route` decision |
-| **appwrite** | Appwrite product, SDK/CLI, or live project ops | `appwrite_skill` + shared tools + MCP + `console` |
-| **researcher** | Open-web research, calc, fetch | Shared tools + MCP |
-| **worker** | Plans / generic answers / Console UI; also **fallback** if researcher/appwrite looks failed | Shared tools + MCP + `console` |
+| Role | Responsibility | When it runs | Tools |
+|------|----------------|--------------|-------|
+| **Supervisor** | Pick one subagent (or answer directly) | Every turn | None — structured `Route` (`next`, `reason`, optional `final_answer`) |
+| **platform** | Appwrite product specialist — SDKs, CLI, Auth, TablesDB, Storage, Functions, Sites, Messaging, permissions, Cloud vs self-hosted, and live project ops via MCP | Product/SDK/CLI questions and in-project mutations when MCP is connected | `appwrite_skill` + shared tools + MCP + `console` |
+| **researcher** | Open-web fact finding | News, lookups, calc, fetch public pages | Shared tools + MCP |
+| **planner** | Plans, structured guidance, Console UI side-effects, sandbox proposals; also the **fallback** if platform/researcher stall | Non-Appwrite planning, Console UI-only asks, or recovery after a stalled primary | Shared tools + MCP + `console` |
 
 **Shared tools:** `calculator`, `current_time`, `web_search`, `browser_fetch`, `sandbox_exec` (stub), `console` (UI protocol). MCP tools from `mcp_connections` are attached to every subagent; create mutations are write-guarded (dedupe / `already_exists` recovery).
 
 **Console protocol.** After MCP create/update/delete (or when the user asks to change theme / navigate / open a dialog), agents call the `console` tool with a JSON action list. For list/query answers (databases, users, …) they emit `resource_list` instead of markdown tables. The tool returns an `appwrite.console/v1` envelope on `tool_end`; the Console parses it into cards, lists, and shell side-effects. See [docs/console-protocol.md](docs/console-protocol.md).
 
-**Turn shape:** route once → stream one subagent → optional worker fallback → `done`. History is trimmed to the last 12 turns server-side. No durable graph checkpoint — Cloud/proxy owns conversation state.
+**Turn shape:** route once → stream one subagent → optional planner fallback → `done`. History is trimmed to the last 12 turns server-side. No durable graph checkpoint — Cloud/proxy owns conversation state.
 
 ## Quick start
 
