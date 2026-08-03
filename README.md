@@ -86,7 +86,7 @@ docker build \
   ],
   "llm": {
     "api_key": "...",
-    "model": "openai/gpt-4o",
+    "model": "openai/gpt-5.6",
     "base_url": "https://api.openai.com/v1",
     "temperature": 0.2
   }
@@ -101,7 +101,7 @@ docker build \
 | `mcp_connections` | no | Full MCP URL + tokens + `client_info` for this turn |
 | `llm` | no | Per-turn credential/model override (see below) |
 
-**`llm` override.** Optional object merged over env `LLM_*` for this turn only. Omitted fields keep the env defaults. Cloud uses this when a conversation selects a user-owned model (`assistantModels`); omit it to use the shared Appwrite default. The key is never logged.
+**`llm` override.** Optional object merged over env `LLM_*` for this turn only. Omitted fields keep the env defaults. Cloud uses this when a conversation selects a user-owned model (`assistantModels`); omit it to use the shared Appwrite default. The key is never logged. GPT-5 reasoning models and the o-series omit custom `temperature` and run on the Responses API (`use_responses_api`) so function tools work; chat models like `gpt-4o` keep Chat Completions + temperature.
 
 ### Title request
 
@@ -131,7 +131,7 @@ Production Appwrite should own steps 1–4 and replay credentials on each turn t
 |----------|----------|---------|
 | `ASSISTANT_API_KEY` | yes (prod) | Clients send `X-Session-API-Key` |
 | `LLM_API_KEY` | yes* | Default model provider API key (`*` or supply `llm.api_key` per turn) |
-| `LLM_MODEL` | no | Default `openai/gpt-4o` (overridable via `llm.model`) |
+| `LLM_MODEL` | no | Default `openai/gpt-5.6` (overridable via `llm.model`) |
 | `LLM_BASE_URL` | no | Optional OpenAI-compatible base URL (overridable via `llm.base_url`) |
 | `WEB_SEARCH_ENABLED` | no | Headless browser web search (default `true`) |
 | `ATTACHMENTS_MAX_BYTES` | no | Max inline attachment size (default 10MB) |

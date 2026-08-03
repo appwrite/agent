@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
 from app.graph.skills import skill_index_text
+from app.graph.content import content_to_text
 from app.graph.tools import build_appwrite_tools, build_tools
 
 _graph = None
@@ -138,6 +139,26 @@ Return a concise result the supervisor can finish with.
 """
 
 
+def _is_openai_reasoning_model(model: str) -> bool:
+    """True for OpenAI reasoning models (gpt-5* except gpt-5-chat*, o-series).
+
+    These models reject custom temperature and cannot use function tools on
+    /v1/chat/completions unless reasoning_effort is none — use /v1/responses instead.
+    """
+    name = model.rsplit("/", 1)[-1].strip().lower()
+    if name.startswith("gpt-5-chat"):
+        return False
+    if name.startswith("gpt-5"):
+        return True
+    if len(name) >= 2 and name[0] == "o" and name[1].isdigit():
+        return True
+    return False
+
+
+def _model_allows_custom_temperature(model: str) -> bool:
+    return not _is_openai_reasoning_model(model)
+
+
 def _make_llm(settings: Settings, override: dict | None = None) -> ChatOpenAI:
     """Build the chat model. `override` (api_key/model/base_url/temperature)
     lets a single turn pin its own credential instead of the env defaults —
@@ -150,12 +171,19 @@ def _make_llm(settings: Settings, override: dict | None = None) -> ChatOpenAI:
     if not api_key:
         raise RuntimeError("LLM_API_KEY is required")
 
-    temperature = override.get("temperature")
+    model = override.get("model") or settings.chat_model
     kwargs: dict = {
-        "model": override.get("model") or settings.chat_model,
+        "model": model,
         "api_key": api_key,
-        "temperature": 0.2 if temperature is None else temperature,
     }
+
+    if _model_allows_custom_temperature(model):
+        temperature = override.get("temperature")
+        kwargs["temperature"] = 0.2 if temperature is None else temperature
+    else:
+        # Function tools + default reasoning_effort 400 on chat.completions for
+        # gpt-5.6 / o-series; Responses API is the supported path.
+        kwargs["use_responses_api"] = True
 
     base_url = override.get("base_url") or settings.llm_base_url
     if base_url:
@@ -167,8 +195,7 @@ def _make_llm(settings: Settings, override: dict | None = None) -> ChatOpenAI:
 def _last_ai_text(messages: list[BaseMessage]) -> str:
     for msg in reversed(messages):
         if isinstance(msg, AIMessage):
-            content = msg.content
-            return content if isinstance(content, str) else str(content)
+            return content_to_text(msg.content)
     return ""
 
 
@@ -225,7 +252,7 @@ def build_graph(settings: Settings | None = None):
             config={"recursion_limit": recursion},
         )
         last = result["messages"][-1]
-        content = last.content if isinstance(last.content, str) else str(last.content)
+        content = content_to_text(last.content)
         return {
             "messages": [AIMessage(content=f"[{tag}] {content}")],
             "handoffs": int(state.get("handoffs") or 0) + 1,

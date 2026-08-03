@@ -13,7 +13,7 @@ services:
     environment:
       ASSISTANT_API_KEY: ${ASSISTANT_API_KEY:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-openai/gpt-4o}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-5.6}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       WEB_SEARCH_ENABLED: ${WEB_SEARCH_ENABLED:-true}
       MCP_OAUTH_REDIRECT_BASE: ${MCP_OAUTH_REDIRECT_BASE:-http://localhost:3001}

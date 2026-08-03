@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import get_settings
 from app.graph.builder import _make_llm
+from app.graph.content import content_to_text
 
 _TITLE_SYSTEM = """\
 You name chat conversations.
@@ -60,5 +61,4 @@ async def generate_conversation_title(
             HumanMessage(content=prompt),
         ]
     )
-    content = result.content if isinstance(result.content, str) else str(result.content)
-    return _sanitize_title(content)
+    return _sanitize_title(content_to_text(result.content))

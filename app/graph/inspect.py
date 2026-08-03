@@ -11,6 +11,7 @@ from app.graph.builder import (
     RESEARCHER_PROMPT,
     SUPERVISOR_PROMPT,
     WORKER_PROMPT,
+    _model_allows_custom_temperature,
 )
 from app.graph.browser import CACHE_TTL_S
 from app.graph.skills import list_skill_meta
@@ -51,7 +52,12 @@ def agent_settings_snapshot() -> dict[str, Any]:
             "chat_model": settings.chat_model,
             "base_url": settings.llm_base_url or None,
             "api_key_configured": bool(settings.llm_api_key),
-            "temperature": LLM_TEMPERATURE,
+            # Reasoning models (gpt-5*, o-series) only accept the API default; we omit it.
+            "temperature": (
+                LLM_TEMPERATURE
+                if _model_allows_custom_temperature(settings.chat_model)
+                else None
+            ),
         },
         "auth": {
             "session_api_key_configured": bool(settings.assistant_api_key),

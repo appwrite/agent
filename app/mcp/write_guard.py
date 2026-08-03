@@ -381,16 +381,13 @@ def _dedupe_key(tool_name: str, arguments: Any) -> str | None:
 
 
 def _as_text(result: Any) -> str:
+    from app.graph.content import content_to_text
+
     if isinstance(result, BaseException):
         return str(result)
     if isinstance(result, tuple) and result:
-        content = result[0]
-        if isinstance(content, list):
-            return "\n".join(str(part) for part in content)
-        return content if isinstance(content, str) else str(content)
-    if isinstance(result, list):
-        return "\n".join(str(part) for part in result)
-    return result if isinstance(result, str) else str(result)
+        return content_to_text(result[0])
+    return content_to_text(result)
 
 
 def _content_and_artifact(text: str, result: Any = None) -> tuple[str, Any]:

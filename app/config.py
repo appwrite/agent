@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     assistant_api_key: str = Field(default="", alias="ASSISTANT_API_KEY")
 
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
-    llm_model: str = Field(default="openai/gpt-4o", alias="LLM_MODEL")
+    llm_model: str = Field(default="openai/gpt-5.6", alias="LLM_MODEL")
     llm_base_url: str | None = Field(default=None, alias="LLM_BASE_URL")
 
     # Headless browser web search (no Search API key). Default on.
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
 
     @property
     def chat_model(self) -> str:
-        # Accept litellm-style "openai/gpt-4o" or bare "gpt-4o".
+        # Accept litellm-style "openai/gpt-5.6" or bare "gpt-5.6".
         model = self.llm_model
         if "/" in model:
             _, model = model.split("/", 1)

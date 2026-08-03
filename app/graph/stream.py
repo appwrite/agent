@@ -20,6 +20,7 @@ from app.graph.builder import (
     _make_llm,
     _strip_tags,
 )
+from app.graph.content import content_to_text, structured_to_json_text
 from app.graph.title import generate_conversation_title
 from app.graph.tools import build_appwrite_tools, build_tools
 from app.mcp import get_mcp_manager
@@ -38,13 +39,26 @@ def _strip_agent_prefix(text: str) -> str:
 def _preview(value: Any, limit: int) -> str:
     if value is None:
         return ""
-    if hasattr(value, "content"):
+    if hasattr(value, "content") and not isinstance(value, (str, dict, list)):
         value = value.content
-    text = value if isinstance(value, str) else str(value)
+    # Content-block lists → plain text; other structures → real JSON (true/false).
+    if isinstance(value, list) and value and _looks_like_content_blocks(value):
+        text = content_to_text(value)
+    elif isinstance(value, (dict, list)):
+        text = structured_to_json_text(value)
+    else:
+        text = content_to_text(value)
     text = text.strip()
     if limit > 0 and len(text) > limit:
         return text[: limit - 1] + "…"
     return text
+
+
+def _looks_like_content_blocks(value: list[Any]) -> bool:
+    first = value[0]
+    if isinstance(first, dict):
+        return "text" in first or first.get("type") in (None, "text", "output_text")
+    return hasattr(first, "text")
 
 
 def _looks_like_failure(text: str) -> bool:
@@ -110,11 +124,8 @@ async def _stream_subagent(
         if kind == "on_chat_model_stream":
             chunk = data.get("chunk")
             piece = getattr(chunk, "content", None) if chunk is not None else None
-            if isinstance(piece, list):
-                piece = "".join(
-                    p.get("text", "") if isinstance(p, dict) else str(p) for p in piece
-                )
-            if isinstance(piece, str) and piece:
+            piece = content_to_text(piece)
+            if piece:
                 if not streaming_answer:
                     streaming_answer = True
                     yield {"type": "answer_start", "agent": agent_name}
