@@ -8,8 +8,8 @@
 #   ./scripts/update-appwrite-skills.sh list      # show installed skills
 #   ./scripts/update-appwrite-skills.sh check     # show lockfile summary
 #
-# After updating, rebuild the assistant image so Docker picks up new files:
-#   docker compose up --build -d assistant
+# After updating, rebuild the agent image so Docker picks up new files:
+#   docker compose up --build -d agent
 
 set -euo pipefail
 
@@ -88,7 +88,7 @@ cmd_refresh() {
   cmd_check
   echo
   echo "Done. Commit changes to ${SKILLS_DIR}/ and ${LOCK_FILE}, then:"
-  echo "  docker compose up --build -d assistant"
+  echo "  docker compose up --build -d agent"
 }
 
 usage() {

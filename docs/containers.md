@@ -1,11 +1,11 @@
-# Appwrite Assistant — LangGraph container notes
+# Appwrite Agent — container notes
 
-Shared long-running assistant engine for Cloud `/v1/assistant`. Cloud keeps HTTP, DB, Realtime, OAuth, and the worker; this repo owns the LangGraph runtime image.
+Shared long-running agent engine for Cloud `/v1/agent`. Cloud keeps HTTP, DB, Realtime, OAuth, and the worker; this repo owns the runtime image.
 
 ## Model
 
-- One shared service (`appwrite-assistant`) on port `8000`.
-- Auth via `ASSISTANT_API_KEY` → header `X-Session-API-Key`.
+- One shared service (`appwrite-agent`) on port `8000`.
+- Auth via `AGENT_API_KEY` → header `X-Session-API-Key`.
 - Local UI proxies `/api` to the engine (`:3001`). Not for Cloud ingress.
 - **Stateless:** conversations, attachments, and MCP tokens are supplied per `POST /api/turn`. No durable volumes. **No MCP OAuth on the engine.**
 - Each turn routes once to `platform` / `researcher` / `planner` (or `FINISH`), with an optional planner fallback if the primary agent stalls.
@@ -20,8 +20,8 @@ OAuth lives in the client/proxy. The POC UI implements browser PKCE at `/oauth/m
 
 | ConfigMap / `.env` | Container env |
 |--------------------|---------------|
-| `_APP_ASSISTANT_API_KEY` | `ASSISTANT_API_KEY` |
-| `_APP_ASSISTANT_LLM_API_KEY` | `LLM_API_KEY` |
-| `_APP_ASSISTANT_LLM_MODEL` | `LLM_MODEL` |
+| `_APP_AGENT_API_KEY` | `AGENT_API_KEY` |
+| `_APP_AGENT_LLM_API_KEY` | `LLM_API_KEY` |
+| `_APP_AGENT_LLM_MODEL` | `LLM_MODEL` |
 
-Worker endpoint: `http://appwrite-assistant:8000`.
+Worker endpoint: `http://appwrite-agent:8000`.

@@ -102,7 +102,7 @@ export function McpOAuthCallbackPage() {
         // Also stash for same-tab fallback (no opener).
         try {
           localStorage.setItem(
-            "assistant_mcp_oauth_result",
+            "agent_mcp_oauth_result",
             JSON.stringify(payload)
           )
         } catch {
@@ -144,7 +144,7 @@ export function McpOAuthCallbackPage() {
         {!done ? <Spinner /> : null}
         <span>
           {done
-            ? "You can close this window and return to the assistant."
+            ? "You can close this window and return to the agent."
             : "Exchanging authorization code…"}
         </span>
       </div>

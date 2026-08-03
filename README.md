@@ -1,6 +1,6 @@
-# Appwrite Assistant (LangGraph)
+# Appwrite Agent
 
-POC assistant engine for Appwrite Cloud `/v1/assistant`, built on [LangGraph](https://github.com/langchain-ai/langgraph).
+POC agent engine for Appwrite Cloud `/v1/agent`, built on [LangGraph](https://github.com/langchain-ai/langgraph).
 
 **Stateless by design.** Cloud (or any proxy) owns conversation persistence, Realtime, and auth. The UI/client owns MCP OAuth and credentials. This service is the agent runtime only — every turn receives the context it needs over the API.
 
@@ -58,18 +58,18 @@ flowchart TD
 
 ```bash
 cp .env.example .env
-# set ASSISTANT_API_KEY and LLM_API_KEY
+# set AGENT_API_KEY and LLM_API_KEY
 
 # Stamp the image so /health and startup logs show which build is running
-export ASSISTANT_BUILD_ID="$(git rev-parse --short HEAD)"
-export ASSISTANT_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+export AGENT_BUILD_ID="$(git rev-parse --short HEAD)"
+export AGENT_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 docker compose up --build -d
 
 curl -s http://127.0.0.1:8000/health
 # → {"status":"ok","build_id":"abc1234","build_time":"2026-08-01T17:56:00Z"}
 
-curl -sN -H "X-Session-API-Key: $ASSISTANT_API_KEY" \
+curl -sN -H "X-Session-API-Key: $AGENT_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"message":"What is 17*19?","history":[]}' \
   http://127.0.0.1:8000/api/turn
@@ -83,14 +83,14 @@ curl -sN -H "X-Session-API-Key: $ASSISTANT_API_KEY" \
 ```bash
 cd /path/to/eldadfux/openhands
 docker build \
-  --build-arg ASSISTANT_BUILD_ID="$(git rev-parse --short HEAD)" \
-  --build-arg ASSISTANT_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --build-arg AGENT_BUILD_ID="$(git rev-parse --short HEAD)" \
+  --build-arg AGENT_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   -t ghcr.io/eldadfux/openhands:dev \
   .
 
 # Then recreate the cloud compose service that pulls that tag:
-# cd cloud && docker compose --profile assistant up -d --force-recreate appwrite-assistant
-# curl -s http://127.0.0.1:8000/health && docker logs appwrite-assistant 2>&1 | head -20
+# cd cloud && docker compose --profile agent up -d --force-recreate appwrite-agent
+# curl -s http://127.0.0.1:8000/health && docker logs appwrite-agent 2>&1 | head -20
 ```
 
 ## API
@@ -143,7 +143,7 @@ docker build \
 | `mcp_connections` | no | Full MCP URL + tokens + `client_info` for this turn |
 | `llm` | no | Per-turn credential/model override (see below) |
 
-**`llm` override.** Optional object merged over env `LLM_*` for this turn only. Omitted fields keep the env defaults. Cloud uses this when a conversation selects a user-owned model (`assistantModels`); omit it to use the shared Appwrite default. The key is never logged. GPT-5 reasoning models and the o-series omit custom `temperature` and run on the Responses API (`use_responses_api`) so function tools work; chat models like `gpt-4o` keep Chat Completions + temperature.
+**`llm` override.** Optional object merged over env `LLM_*` for this turn only. Omitted fields keep the env defaults. Cloud uses this when a conversation selects a user-owned model (`agentModels`); omit it to use the shared Appwrite default. The key is never logged. GPT-5 reasoning models and the o-series omit custom `temperature` and run on the Responses API (`use_responses_api`) so function tools work; chat models like `gpt-4o` keep Chat Completions + temperature.
 
 ### Title request
 
@@ -171,7 +171,7 @@ Production Appwrite should own steps 1–4 and replay credentials on each turn t
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `ASSISTANT_API_KEY` | yes (prod) | Clients send `X-Session-API-Key` |
+| `AGENT_API_KEY` | yes (prod) | Clients send `X-Session-API-Key` |
 | `LLM_API_KEY` | yes* | Default model provider API key (`*` or supply `llm.api_key` per turn) |
 | `LLM_MODEL` | no | Default `openai/gpt-5.6` (overridable via `llm.model`) |
 | `LLM_BASE_URL` | no | Optional OpenAI-compatible base URL (overridable via `llm.base_url`) |
@@ -191,7 +191,7 @@ Production Appwrite should own steps 1–4 and replay credentials on each turn t
 
 ```bash
 ./scripts/update-appwrite-skills.sh
-docker compose up --build -d assistant
+docker compose up --build -d agent
 ```
 
 ## Local (no Docker)
@@ -200,6 +200,6 @@ docker compose up --build -d assistant
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
-export LLM_API_KEY=... ASSISTANT_API_KEY=...
+export LLM_API_KEY=... AGENT_API_KEY=...
 uvicorn app.main:app --reload --port 8000
 ```

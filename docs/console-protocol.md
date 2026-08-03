@@ -1,6 +1,6 @@
 # Appwrite Console protocol (`appwrite.console/v1`)
 
-Shareable contract between the **assistant engine** (this repo) and the **Appwrite Console** (vibes). The agent posts UI metadata via the built-in `console` tool; the Console parses the tool result and turns it into components / side-effects.
+Shareable contract between the **agent engine** (this repo) and the **Appwrite Console** (vibes). The agent posts UI metadata via the built-in `console` tool; the Console parses the tool result and turns it into components / side-effects.
 
 This is **not** resource CRUD. Mutations still go through MCP (or other APIs). `console` only describes what the Console should show or do in the shell — including **structured resource lists** so the Console can render filters, validation, and deep links instead of parsing markdown.
 
@@ -13,7 +13,7 @@ This is **not** resource CRUD. Mutations still go through MCP (or other APIs). `
 | Tool name | `console` |
 | Tool argument | `actions` — JSON **string** (array of actions, or a single action object) |
 | Tool result | Canonical JSON **envelope** (string). On validation failure: `Error: invalid console actions — …` |
-| Delivery to Console | Same path as other tools: turn timeline `tool_end` with `tool === "console"` and `output` = envelope JSON. Cloud may also persist `resultText` / `resultJson` on `AssistantTool`. |
+| Delivery to Console | Same path as other tools: turn timeline `tool_end` with `tool === "console"` and `output` = envelope JSON. Cloud may also persist `resultText` / `resultJson` on `AgentTool`. |
 
 **Ignore** `console` when classifying MCP resource mutations (it is a UI meta-tool, like `appwrite_search_tools`).
 
@@ -498,7 +498,7 @@ User: “List my databases.”
 1. On timeline / tool replay, when `tool === "console"` and output parses as `appwrite.console/v1`, dispatch `actions` in order.
 2. Reuse Command Center handlers where they already exist (`onSetTheme`, `onProjectCreate`, `onToggleTerminal`, `onOpenConnectMcp`, `navigate`).
 3. For `resource`, render a card (or feed `ConversationResourceSummary`) from the payload — do not re-classify from the tool name.
-4. For `resource_list`, render an inline filterable list/table with per-row links; do not fall back to parsing assistant markdown.
+4. For `resource_list`, render an inline filterable list/table with per-row links; do not fall back to parsing agent markdown.
 5. For `refresh`, invalidate the listed scopes / query keys.
 6. Treat validation-error strings (`Error: invalid console actions — …`) as failed tool calls; show nothing in the shell.
 7. Keep turn timeline UI (`status`, `route`, `tool_*`, …) separate from these shell side-effects.

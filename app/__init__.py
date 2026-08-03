@@ -1,1 +1,1 @@
-"""Appwrite LangGraph assistant engine."""
+"""Appwrite Agent engine."""

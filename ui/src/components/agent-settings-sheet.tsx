@@ -165,9 +165,9 @@ export function AgentSettingsSheet({
     if (!open) return
     // Same-tab OAuth fallback stores a one-shot result.
     try {
-      const raw = localStorage.getItem("assistant_mcp_oauth_result")
+      const raw = localStorage.getItem("agent_mcp_oauth_result")
       if (!raw) return
-      localStorage.removeItem("assistant_mcp_oauth_result")
+      localStorage.removeItem("agent_mcp_oauth_result")
       const data = JSON.parse(raw)
       if (data?.status === "ok" && data.credentials) {
         saveMcpConnection(data.credentials)
@@ -287,7 +287,7 @@ export function AgentSettingsSheet({
         <SheetHeader className="shrink-0 border-b pr-10">
           <SheetTitle>Agent settings</SheetTitle>
           <SheetDescription>
-            Live runtime config from the assistant engine. Secrets stay masked.
+            Live runtime config from the agent engine. Secrets stay masked.
           </SheetDescription>
           <div className="flex gap-2 pt-1">
             <Button

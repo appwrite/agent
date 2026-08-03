@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    assistant_api_key: str = Field(default="", alias="ASSISTANT_API_KEY")
+    agent_api_key: str = Field(default="", alias="AGENT_API_KEY")
 
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
     llm_model: str = Field(default="openai/gpt-5.6", alias="LLM_MODEL")
@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     )
 
     # Caps on tool payloads emitted on the SSE stream (Cloud persists these).
-    # Keep below Cloud assistantTools resultText/resultJson size (1_000_000).
+    # Keep below Cloud agentTools resultText/resultJson size (1_000_000).
     stream_tool_input_chars: int = Field(
         default=100_000,
         alias="STREAM_TOOL_INPUT_CHARS",

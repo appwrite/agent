@@ -490,7 +490,7 @@ export function ChatApp() {
       },
     ])
 
-    const patchAssistant = (
+    const patchAgent = (
       fn: (
         item: Extract<ChatItem, { role: "assistant" }>
       ) => Extract<ChatItem, { role: "assistant" }>
@@ -540,14 +540,14 @@ export function ChatApp() {
         (event: StreamEvent) => {
         switch (event.type) {
           case "status":
-            patchAssistant((item) => ({
+            patchAgent((item) => ({
               ...item,
               statusLabel: event.message || "Working…",
               meta: pushMetaEvent(item, event),
             }))
             break
           case "route":
-            patchAssistant((item) => ({
+            patchAgent((item) => ({
               ...item,
               route: event.next,
               statusLabel:
@@ -566,7 +566,7 @@ export function ChatApp() {
             }))
             break
           case "subagent_start":
-            patchAssistant((item) => ({
+            patchAgent((item) => ({
               ...item,
               statusLabel:
                 event.agent && event.agent !== "supervisor"
@@ -577,14 +577,14 @@ export function ChatApp() {
             break
           case "subagent_end":
           case "model_start":
-            patchAssistant((item) => ({
+            patchAgent((item) => ({
               ...item,
               meta: pushMetaEvent(item, event),
             }))
             break
           case "tool_start": {
             const toolId = newId("tool")
-            patchAssistant((item) => {
+            patchAgent((item) => {
               const tools = [
                 ...item.tools,
                 {
@@ -605,7 +605,7 @@ export function ChatApp() {
             break
           }
           case "tool_end":
-            patchAssistant((item) => {
+            patchAgent((item) => {
               const tools = [...item.tools]
               for (let i = tools.length - 1; i >= 0; i--) {
                 if (
@@ -629,7 +629,7 @@ export function ChatApp() {
             })
             break
           case "answer_start":
-            patchAssistant((item) => ({
+            patchAgent((item) => ({
               ...item,
               content: "",
               streaming: true,
@@ -638,7 +638,7 @@ export function ChatApp() {
             }))
             break
           case "answer_reset":
-            patchAssistant((item) => ({
+            patchAgent((item) => ({
               ...item,
               content: "",
               streaming: true,
@@ -647,7 +647,7 @@ export function ChatApp() {
             }))
             break
           case "token":
-            patchAssistant((item) => {
+            patchAgent((item) => {
               const chunk = event.content || ""
               const content = item.content + chunk
               return {
@@ -665,7 +665,7 @@ export function ChatApp() {
             break
           case "done": {
             const finishedAt = new Date().toISOString()
-            patchAssistant((item) => {
+            patchAgent((item) => {
               const content =
                 event.answer || item.content || "(empty response)"
               return {
@@ -686,7 +686,7 @@ export function ChatApp() {
           }
           case "error":
             toast.error(event.detail || "Agent error")
-            patchAssistant((item) => {
+            patchAgent((item) => {
               const content = item.content || event.detail || "Error"
               const finishedAt = new Date().toISOString()
               return {
@@ -704,7 +704,7 @@ export function ChatApp() {
             })
             break
           case "complete":
-            patchAssistant((item) => ({
+            patchAgent((item) => ({
               ...item,
               streaming: false,
               statusLabel: undefined,
@@ -717,7 +717,7 @@ export function ChatApp() {
             }))
             break
           default:
-            patchAssistant((item) => ({
+            patchAgent((item) => ({
               ...item,
               meta: pushMetaEvent(item, event),
             }))
@@ -729,7 +729,7 @@ export function ChatApp() {
     } catch (err) {
       const detail = String((err as Error).message || err)
       toast.error(detail)
-      patchAssistant((item) => ({
+      patchAgent((item) => ({
         ...item,
         content: item.content || detail,
         streaming: false,
@@ -780,7 +780,7 @@ export function ChatApp() {
               </div>
               <div className="flex min-w-0 flex-col group-data-[collapsible=icon]:hidden">
                 <span className="truncate text-sm font-semibold">
-                  Appwrite Assistant
+                  Appwrite Agent
                 </span>
                 <span className="truncate text-xs text-muted-foreground">
                   LangGraph engine
@@ -1031,7 +1031,7 @@ export function ChatApp() {
                                 </Avatar>
                               </MessageAvatar>
                               <MessageContent>
-                                <MessageHeader>Assistant</MessageHeader>
+                                <MessageHeader>Agent</MessageHeader>
 
                                 <div className="flex w-full min-w-0 flex-col gap-3">
                                   {item.route && item.route !== "FINISH" ? (
@@ -1170,7 +1170,7 @@ export function ChatApp() {
                   <InputGroupTextarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    placeholder="Message Appwrite Assistant…"
+                    placeholder="Message Appwrite Agent…"
                     disabled={busy}
                     rows={2}
                     onKeyDown={(e) => {

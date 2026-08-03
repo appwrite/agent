@@ -102,14 +102,14 @@ export type AgentSettings = {
 
 declare global {
   interface Window {
-    ASSISTANT_API_KEY?: string
+    AGENT_API_KEY?: string
   }
 }
 
 function apiKey(): string {
   return (
-    window.ASSISTANT_API_KEY ||
-    localStorage.getItem("assistant_api_key") ||
+    window.AGENT_API_KEY ||
+    localStorage.getItem("agent_api_key") ||
     ""
   )
 }
@@ -142,8 +142,8 @@ export type McpConnectionCredentials = {
   client_info?: Record<string, unknown>
 }
 
-const MCP_CONNECTIONS_KEY = "assistant_mcp_connections"
-const MCP_CUSTOM_SERVERS_KEY = "assistant_mcp_custom_servers"
+const MCP_CONNECTIONS_KEY = "agent_mcp_connections"
+const MCP_CUSTOM_SERVERS_KEY = "agent_mcp_custom_servers"
 
 function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = {}
@@ -391,8 +391,8 @@ export async function streamChat(
 
 export function ensureApiKey(): boolean {
   if (apiKey()) return true
-  const key = window.prompt("Session API key (ASSISTANT_API_KEY)")
+  const key = window.prompt("Session API key (AGENT_API_KEY)")
   if (!key) return false
-  localStorage.setItem("assistant_api_key", key)
+  localStorage.setItem("agent_api_key", key)
   return true
 }

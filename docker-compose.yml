@@ -1,23 +1,23 @@
 services:
-  assistant:
+  agent:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        ASSISTANT_BUILD_ID: ${ASSISTANT_BUILD_ID:-local}
-        ASSISTANT_BUILD_TIME: ${ASSISTANT_BUILD_TIME:-unknown}
-    image: ${ASSISTANT_IMAGE:-ghcr.io/eldadfux/openhands:dev}
-    container_name: appwrite-assistant
+        AGENT_BUILD_ID: ${AGENT_BUILD_ID:-local}
+        AGENT_BUILD_TIME: ${AGENT_BUILD_TIME:-unknown}
+    image: ${AGENT_IMAGE:-ghcr.io/eldadfux/openhands:dev}
+    container_name: appwrite-agent
     ports:
-      - "${ASSISTANT_PORT:-8000}:8000"
+      - "${AGENT_PORT:-8000}:8000"
     environment:
-      ASSISTANT_API_KEY: ${ASSISTANT_API_KEY:-}
+      AGENT_API_KEY: ${AGENT_API_KEY:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-openai/gpt-5.6}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       WEB_SEARCH_ENABLED: ${WEB_SEARCH_ENABLED:-true}
-      ASSISTANT_BUILD_ID: ${ASSISTANT_BUILD_ID:-local}
-      ASSISTANT_BUILD_TIME: ${ASSISTANT_BUILD_TIME:-unknown}
+      AGENT_BUILD_ID: ${AGENT_BUILD_ID:-local}
+      AGENT_BUILD_TIME: ${AGENT_BUILD_TIME:-unknown}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
       interval: 10s
@@ -30,13 +30,13 @@ services:
     build:
       context: ./ui
       dockerfile: Dockerfile
-    image: ${ASSISTANT_UI_IMAGE:-ghcr.io/eldadfux/openhands-ui:dev}
-    container_name: appwrite-assistant-ui
+    image: ${AGENT_UI_IMAGE:-ghcr.io/eldadfux/openhands-ui:dev}
+    container_name: appwrite-agent-ui
     ports:
-      - "${ASSISTANT_UI_PORT:-3001}:80"
+      - "${AGENT_UI_PORT:-3001}:80"
     environment:
-      ASSISTANT_API_KEY: ${ASSISTANT_API_KEY:-}
+      AGENT_API_KEY: ${AGENT_API_KEY:-}
     depends_on:
-      assistant:
+      agent:
         condition: service_healthy
     restart: unless-stopped

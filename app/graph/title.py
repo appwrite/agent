@@ -52,7 +52,7 @@ async def generate_conversation_title(
 
     prompt = f"User message:\n{user[:1200]}\n"
     if assistant:
-        prompt += f"\nAssistant reply (context only):\n{assistant[:800]}\n"
+        prompt += f"\nAgent reply (context only):\n{assistant[:800]}\n"
     prompt += "\nConversation title:"
 
     result = await llm.ainvoke(

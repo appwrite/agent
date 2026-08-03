@@ -6,7 +6,7 @@
 
 import type { McpConnectionCredentials } from "@/lib/api"
 
-const PENDING_KEY = "assistant_mcp_oauth_pending"
+const PENDING_KEY = "agent_mcp_oauth_pending"
 
 export type McpServerRef = {
   id: string
@@ -111,7 +111,7 @@ async function discoverProtectedResource(
         params: {
           protocolVersion: "2025-03-26",
           capabilities: {},
-          clientInfo: { name: "appwrite-assistant-ui", version: "0.1.0" },
+          clientInfo: { name: "appwrite-agent-ui", version: "0.1.0" },
         },
       }),
     })
@@ -234,7 +234,7 @@ export async function beginMcpOAuth(
     clientInfo = await registerClient(
       asMeta.registration_endpoint,
       redirectUri,
-      opts?.clientName || "Appwrite Assistant"
+      opts?.clientName || "Appwrite Agent"
     )
   }
 

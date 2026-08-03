@@ -13,7 +13,7 @@ logger = logging.getLogger("uvicorn.error")
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logger.info(
-        "appwrite-assistant starting build_id=%s build_time=%s",
+        "appwrite-agent starting build_id=%s build_time=%s",
         BUILD_ID,
         BUILD_TIME,
     )
@@ -21,8 +21,8 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="Appwrite Assistant (LangGraph)",
-    description="Cluster-internal coding/assistant engine for Appwrite Cloud /v1/assistant.",
+    title="Appwrite Agent",
+    description="Cluster-internal agent engine for Appwrite Cloud /v1/agent.",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -41,7 +41,7 @@ app.include_router(router)
 @app.get("/")
 async def root():
     return {
-        "service": "appwrite-assistant",
+        "service": "appwrite-agent",
         "engine": "langgraph",
         "docs": "/docs",
         **as_dict(),

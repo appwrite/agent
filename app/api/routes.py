@@ -1,4 +1,4 @@
-"""Stateless assistant HTTP API — all durable context is supplied by the caller."""
+"""Stateless agent HTTP API — all durable context is supplied by the caller."""
 
 from __future__ import annotations
 

@@ -59,7 +59,7 @@ def agent_settings_snapshot() -> dict[str, Any]:
             ),
         },
         "auth": {
-            "session_api_key_configured": bool(settings.assistant_api_key),
+            "session_api_key_configured": bool(settings.agent_api_key),
             "header": "X-Session-API-Key",
         },
         "server": {
@@ -130,7 +130,7 @@ def agent_settings_snapshot() -> dict[str, Any]:
             "HOST": settings.host,
             "PORT": str(settings.port),
             "LLM_API_KEY": "••••••" if settings.llm_api_key else "",
-            "ASSISTANT_API_KEY": "••••••" if settings.assistant_api_key else "",
+            "AGENT_API_KEY": "••••••" if settings.agent_api_key else "",
         },
         "console_protocol": {
             "id": "appwrite.console/v1",
