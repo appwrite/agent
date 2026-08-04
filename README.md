@@ -9,7 +9,7 @@ POC agent engine for Appwrite Cloud `/v1/agent`, built on [LangGraph](https://gi
 - **One-shot router + subagents** (`platform`, `researcher`, `planner`) via LangGraph `create_react_agent` — each turn routes once (with an optional planner fallback if the primary agent stalls)
 - **Platform agent** with official [agent-skills](https://github.com/appwrite/agent-skills) vendored under `.agents/skills/`
 - **Safe tools by default** — no host shell for the model
-- Tools: `calculator`, `current_time`, `web_search`, `browser_fetch`, `appwrite_skill`, `sandbox_exec` stub, **`console`** (Console UI protocol), plus MCP tools from credentials on the turn
+- Tools: `calculator`, `current_time`, `web_search`, `browser_fetch`, `appwrite_skill`, `sandbox_exec` stub, **`console`** (Console UI protocol), **`memory`** (lasting preferences), plus MCP tools from credentials on the turn
 - FastAPI + shadcn chat UI
 - **[Console protocol](docs/console-protocol.md)** (`appwrite.console/v1`) — agent → Console metadata for theme, navigation, toasts, resource cards, lists, and usage charts
 
@@ -48,9 +48,11 @@ flowchart TD
 | **researcher** | Open-web fact finding | News, lookups, calc, fetch public pages | Shared tools + MCP |
 | **planner** | Plans, structured guidance, Console UI side-effects, sandbox proposals; also the **fallback** if platform/researcher stall | Non-Appwrite planning, Console UI-only asks, or recovery after a stalled primary | Shared tools + MCP + `console` |
 
-**Shared tools:** `calculator`, `current_time`, `web_search`, `browser_fetch`, `sandbox_exec` (stub), `console` (UI protocol). MCP tools from `mcp_connections` are attached to every subagent; create mutations are write-guarded (dedupe / `already_exists` recovery).
+**Shared tools:** `calculator`, `current_time`, `web_search`, `browser_fetch`, `sandbox_exec` (stub), `console` (UI protocol), `memory` (set/forget lasting preferences). MCP tools from `mcp_connections` are attached to every subagent; create mutations are write-guarded (dedupe / `already_exists` recovery).
 
 **Console protocol.** After MCP create/update/delete (or when the user asks to change theme / navigate / open a dialog), agents call the `console` tool with a JSON action list. For list/query answers (databases, users, …) they emit `resource_list` instead of markdown tables. For usage metrics they emit `chart` (e.g. metric `network.requests` with an `interval`). The tool returns an `appwrite.console/v1` envelope on `tool_end`; the Console parses it into cards, lists, and shell side-effects. See [docs/console-protocol.md](docs/console-protocol.md).
+
+**Memory protocol.** When the user asks to remember or forget lasting preferences/instructions, agents call the `memory` tool (`type=set` / `type=forget`). The tool returns an `appwrite.memory/v1` envelope; Cloud persists successful calls into `agentMemories` and injects active memories on later turns.
 
 **Turn shape:** route once → stream one subagent → optional planner fallback → `done`. History is trimmed to the last 12 turns server-side. No durable graph checkpoint — Cloud/proxy owns conversation state.
 

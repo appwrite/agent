@@ -16,6 +16,7 @@ from app.attachments import text_from_bytes
 from app.config import get_settings
 from app.graph.browser import browser_fetch_text, host_of, web_search_results
 from app.graph.console import ConsoleProtocolError, emit_console_actions
+from app.graph.memory import MemoryProtocolError, emit_memory_actions
 from app.graph.skills import load_skill, resolve_skill_key, skill_index_text
 from app.turn_context import (
     find_turn_attachment,
@@ -311,6 +312,37 @@ def console(
         return f"Error: invalid console actions — {exc}"
 
 
+@tool
+def memory(
+    actions: Annotated[
+        str,
+        "JSON array (or single object) of memory actions to remember or forget. "
+        "Each object needs type=set|forget and a stable key matching "
+        "^[a-z][a-z0-9_.-]{1,127}$ (e.g. style.concise, prefer.region). "
+        "For type=set also pass content (required) and optional category "
+        "(preference|instruction|fact, default preference), priority (int, "
+        "higher kept first under budget), and scope (only user is supported). "
+        "For type=forget pass key (+ optional scope=user). "
+        "Examples: "
+        '[{"type":"set","key":"style.concise","content":"Prefer concise answers",'
+        '"category":"preference","priority":10}] or '
+        '[{"type":"forget","key":"style.concise"}]. '
+        "Use when the user states a lasting preference/instruction, or asks "
+        "you to remember or forget something across conversations. Do not store "
+        "secrets, one-off task details, or transient console context.",
+    ],
+) -> str:
+    """Save or forget lasting user preferences and instructions across conversations.
+
+    Cloud persists successful calls into agent memory (injected on later turns).
+    Prefer one clear key per fact and update it instead of creating duplicates.
+    """
+    try:
+        return emit_memory_actions(actions)
+    except MemoryProtocolError as exc:
+        return f"Error: invalid memory actions — {exc}"
+
+
 def build_tools() -> list:
     return [
         calculator,
@@ -321,6 +353,7 @@ def build_tools() -> list:
         read_attachment,
         sandbox_exec,
         console,
+        memory,
     ]
 
 
@@ -335,4 +368,5 @@ def build_appwrite_tools() -> list:
         read_attachment,
         sandbox_exec,
         console,
+        memory,
     ]

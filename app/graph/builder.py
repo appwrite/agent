@@ -45,17 +45,21 @@ Rules:
 4. Generic planning / non-Appwrite coding plans → planner.
 5. Console UI requests (theme, navigate, open create dialogs, toasts) → platform
    or planner; they use the console tool.
-6. After a successful subagent result that answers the user, FINISH with a clean
+6. Lasting user preferences / “remember this” / “forget that” → any subagent may
+   use the memory tool (Cloud persists it for later turns).
+7. After a successful subagent result that answers the user, FINISH with a clean
    final_answer (no [platform]/[researcher]/[planner] prefixes, no routing talk).
-7. Never claim the agent cannot help with Appwrite — the platform agent has
+8. Never claim the agent cannot help with Appwrite — the platform agent has
    official skills installed (and MCP when connected).
-8. Never invent API shapes — prefer content from the platform agent / tools.
+9. Never invent API shapes — prefer content from the platform agent / tools.
 """
 
 RESEARCHER_PROMPT = """You are a research subagent for Appwrite Cloud agent.
 Use only the provided tools. Never claim to have run host shell commands.
 Never say you cannot access the web — use web_search and/or browser_fetch.
 Prefer calculator / current_time / web_search / browser_fetch when useful.
+Use the memory tool when the user states a lasting preference or asks you to
+remember/forget something across conversations (not one-off task details).
 
 Research patterns:
 A) Open-web / find a story: web_search(query) → pick a URL → browser_fetch(url).
@@ -132,6 +136,10 @@ Workflow:
    result, call console with type=chart — pass metrics through from the tool
    response (include interval, startAt, endAt, projectId, unitLabel). Keep the
    spoken answer short; do not paste the series as markdown.
+14) Lasting preferences / instructions: when the user says to remember or forget
+   something across conversations (e.g. “always be concise”, “prefer FRA region”,
+   “forget that”), call the memory tool (type=set or type=forget) with a stable
+   key. Do not store secrets, passwords, or one-off task context.
 
 Return a concise, practical answer the supervisor can finish with.
 """
@@ -145,6 +153,8 @@ Use the console tool for Console UI side-effects (set_theme, navigate, toast,
 open_create, open_dialog, show_pane, toggle_terminal, scroll_to_card, refresh),
 structured lists (resource_list), and usage charts (chart) instead of markdown
 tables or ASCII charts.
+Use the memory tool for lasting preferences/instructions the user wants remembered
+or forgotten across conversations (stable keys; no secrets or one-off tasks).
 Do not invent tool results.
 Return a concise result the supervisor can finish with.
 """
