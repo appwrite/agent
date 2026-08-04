@@ -74,6 +74,13 @@ def agent_settings_snapshot() -> dict[str, Any]:
             "cache_ttl_seconds": int(CACHE_TTL_S),
             "engine": "playwright/chromium",
         },
+        "http_get": {
+            "enabled": True,
+            "domain_limits": "none (public https only; local/private hosts blocked)",
+            "timeout_seconds": 15,
+            "max_bytes_default": 200_000,
+            "engine": "urllib (no JS)",
+        },
         "web_search": {
             "enabled": bool(settings.web_search_enabled),
             "engine": "headless browser (no API key)",
@@ -136,5 +143,10 @@ def agent_settings_snapshot() -> dict[str, Any]:
             "id": "appwrite.console/v1",
             "tool": "console",
             "doc": "docs/console-protocol.md",
+        },
+        "clarify_protocol": {
+            "id": "appwrite.clarify/v1",
+            "tool": "clarify",
+            "doc": "docs/clarify-protocol.md",
         },
     }

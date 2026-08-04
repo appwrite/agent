@@ -3,20 +3,21 @@
 from __future__ import annotations
 
 import ast
-import ipaddress
 import operator
-import socket
 from datetime import datetime, timezone
 from typing import Annotated
-from urllib.parse import urlparse
+from urllib.error import URLError
 
 from langchain_core.tools import tool
 
 from app.attachments import text_from_bytes
 from app.config import get_settings
-from app.graph.browser import browser_fetch_text, host_of, web_search_results
+from app.graph.browser import browser_fetch_text, web_search_results
+from app.graph.clarify import ClarifyProtocolError, emit_clarify_prompts
 from app.graph.console import ConsoleProtocolError, emit_console_actions
+from app.graph.http_fetch import http_get_text
 from app.graph.memory import MemoryProtocolError, emit_memory_actions
+from app.graph.net import host_of, is_blocked_host, validate_https_url
 from app.graph.skills import load_skill, resolve_skill_key, skill_index_text
 from app.turn_context import (
     find_turn_attachment,
@@ -43,41 +44,6 @@ def _eval_ast(node: ast.AST) -> float:
     if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
         return _OPS[type(node.op)](_eval_ast(node.left), _eval_ast(node.right))
     raise ValueError("Only basic arithmetic is allowed")
-
-
-def _is_blocked_host(hostname: str) -> bool:
-    """Block obvious local/private targets (SSRF), not a public domain allowlist."""
-    host = hostname.lower().strip(".")
-    if host in {"localhost", "0.0.0.0"} or host.endswith(".local"):
-        return True
-    try:
-        ip = ipaddress.ip_address(host)
-        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
-    except ValueError:
-        pass
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except OSError:
-        return False
-    for info in infos:
-        addr = info[4][0]
-        try:
-            ip = ipaddress.ip_address(addr)
-        except ValueError:
-            continue
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-            return True
-    return False
-
-
-def _validate_https_url(url: str) -> str | None:
-    """Return an error string if invalid; otherwise None."""
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.hostname:
-        return "Error: only https:// URLs with a hostname are allowed"
-    if _is_blocked_host(parsed.hostname):
-        return f"Error: host '{parsed.hostname}' is not allowed (local/private)"
-    return None
 
 
 @tool
@@ -110,7 +76,7 @@ def browser_fetch(
     Returns page text plus a Links list so you can open a specific story next.
     Call again with a different article URL for details. Same URL is cached briefly.
     """
-    err = _validate_https_url(url)
+    err = validate_https_url(url)
     if err:
         return err
 
@@ -120,7 +86,7 @@ def browser_fetch(
         return f"Error fetching URL in browser: {exc}"
 
     final_host = host_of(final_url)
-    if final_host and _is_blocked_host(final_host):
+    if final_host and is_blocked_host(final_host):
         return f"Error: redirect landed on blocked host '{final_host}'"
 
     text = (text or "").strip()
@@ -273,6 +239,43 @@ def sandbox_exec(
 
 
 @tool
+def http_get(
+    url: Annotated[
+        str,
+        "HTTPS URL to fetch as raw text/JSON (no JS rendering). "
+        "Good for OpenAPI, raw docs, GitHub raw files, JSON APIs. "
+        "For HTML pages that need a real browser, use browser_fetch instead.",
+    ],
+    max_bytes: Annotated[
+        int,
+        "Max response body bytes to return (1000-500000, default 200000)",
+    ] = 200_000,
+) -> str:
+    """Fetch a public HTTPS URL with a simple HTTP GET (no Chromium).
+
+    Cheaper/faster than browser_fetch for JSON, YAML, Markdown, and other
+    text documents. Same SSRF rules: https only, local/private hosts blocked.
+    Does not execute JavaScript — use browser_fetch for rendered pages.
+    """
+    try:
+        status, final_url, content_type, body = http_get_text(
+            url, max_bytes=max_bytes
+        )
+    except ValueError as exc:
+        return f"Error: {exc}"
+    except (URLError, TimeoutError, OSError) as exc:
+        return f"Error fetching URL: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        return f"Error fetching URL: {exc}"
+
+    final_host = host_of(final_url) or ""
+    return (
+        f"status={status} final_url={final_url} host={final_host} "
+        f"content_type={content_type or 'unknown'}\n\n{body}"
+    )
+
+
+@tool
 def console(
     actions: Annotated[
         str,
@@ -313,6 +316,41 @@ def console(
 
 
 @tool
+def clarify(
+    prompts: Annotated[
+        str,
+        "JSON array (or single object) of clarify prompts for the Console UI. "
+        "Each object needs id, kind (choice|confirm|text), and question. "
+        "choice also needs options[{id,label,description?}]; confirm may set "
+        "danger/confirmLabel/cancelLabel; text may set placeholder/defaultValue/"
+        "multiline. Optional hint and required on any kind. "
+        "Examples: "
+        '[{"id":"bucket","kind":"choice","question":"Which bucket?",'
+        '"options":[{"id":"a","label":"avatars"},{"id":"u","label":"uploads"}]}] or '
+        '[{"id":"confirm_delete","kind":"confirm","question":"Delete this bucket?",'
+        '"danger":true,"confirmLabel":"Delete"}] or '
+        '[{"id":"name","kind":"text","question":"Database name","placeholder":"main"}]. '
+        "Full contract: docs/clarify-protocol.md (protocol appwrite.clarify/v1).",
+    ],
+    title: Annotated[
+        str,
+        "Optional short form title shown above the prompts",
+    ] = "",
+) -> str:
+    """Ask the user a structured follow-up in the Console (choices, confirm, text).
+
+    Use when required details are missing or before destructive deletes — do not
+    guess IDs, permissions, or unique(). After a successful call, stop mutating
+    this turn; wait for the user's next message with answers. The tool result is
+    the canonical JSON envelope the Console parses from tool_end.
+    """
+    try:
+        return emit_clarify_prompts(prompts, title=title or None)
+    except ClarifyProtocolError as exc:
+        return f"Error: invalid clarify prompts — {exc}"
+
+
+@tool
 def memory(
     actions: Annotated[
         str,
@@ -349,10 +387,12 @@ def build_tools() -> list:
         current_time,
         web_search,
         browser_fetch,
+        http_get,
         appwrite_skill,
         read_attachment,
         sandbox_exec,
         console,
+        clarify,
         memory,
     ]
 
@@ -362,11 +402,13 @@ def build_appwrite_tools() -> list:
     return [
         appwrite_skill,
         browser_fetch,
+        http_get,
         web_search,
         current_time,
         calculator,
         read_attachment,
         sandbox_exec,
         console,
+        clarify,
         memory,
     ]

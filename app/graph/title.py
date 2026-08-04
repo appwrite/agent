@@ -13,8 +13,9 @@ from app.graph.content import content_to_text
 _TITLE_SYSTEM = """\
 You name chat conversations.
 
-Return ONLY a short topic title for the conversation — not a sentence, not a \
+Return ONLY a short topic title for the conversation - not a sentence, not a \
 question, not a greeting, and not a copy of the user's message.
+Use a regular hyphen (-) if needed; never use an em dash or en dash.
 
 Rules:
 - 2 to 6 words
