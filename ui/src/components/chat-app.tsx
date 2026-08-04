@@ -103,6 +103,7 @@ import {
 import { Markdown } from "@/components/markdown"
 import { MessageMetadataSheet } from "@/components/message-metadata-sheet"
 import {
+  attachmentKind,
   encodeAttachment,
   ensureApiKey,
   fetchReady,
@@ -168,17 +169,21 @@ function FileChip({
   }
   onRemove?: () => void
 }) {
-  const isImage = file.kind === "image" || file.mime.startsWith("image/")
+  const showPreview = file.mime.startsWith("image/") && Boolean(file.previewUrl)
   const Icon =
-    isImage ? ImageIcon : file.kind === "text" ? FileTextIcon : FileIcon
+    file.kind === "image" || file.mime.startsWith("image/")
+      ? ImageIcon
+      : file.kind === "text"
+        ? FileTextIcon
+        : FileIcon
   return (
     <Attachment
       size="sm"
       state={file.state || "done"}
       className="max-w-[14rem]"
     >
-      <AttachmentMedia variant={isImage && file.previewUrl ? "image" : "icon"}>
-        {isImage && file.previewUrl ? (
+      <AttachmentMedia variant={showPreview ? "image" : "icon"}>
+        {showPreview ? (
           <img src={file.previewUrl} alt={file.name} />
         ) : (
           <Icon />
@@ -407,7 +412,7 @@ export function ChatApp() {
           name: file.name,
           mime: file.type || "application/octet-stream",
           size: file.size,
-          kind: file.type.startsWith("image/") ? "image" : "file",
+          kind: attachmentKind(file.type || "application/octet-stream", file.name),
           previewUrl,
           state: "uploading",
         },

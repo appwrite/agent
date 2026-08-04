@@ -298,23 +298,60 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 
+const VISION_IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/gif",
+  "image/webp",
+])
+
+const TEXT_MIME_TYPES = new Set([
+  "application/json",
+  "application/ld+json",
+  "application/xml",
+  "application/xhtml+xml",
+  "application/x-yaml",
+  "application/yaml",
+  "application/javascript",
+  "application/typescript",
+  "application/sql",
+  "application/graphql",
+  "application/x-sh",
+  "application/x-httpd-php",
+  "image/svg+xml",
+])
+
+const TEXT_EXTENSION_RE =
+  /\.(txt|md|mdx|markdown|rst|json|jsonl|jsonc|ya?ml|xml|svg|csv|tsv|html?|xhtml|css|scss|sass|less|js|jsx|mjs|cjs|ts|tsx|vue|svelte|astro|php|phtml|py|pyi|go|rs|java|kt|kts|swift|rb|c|cc|cpp|cxx|h|hh|hpp|hxx|cs|fs|fsx|dart|lua|pl|pm|r|rmd|jl|ex|exs|erl|hrl|clj|cljs|scala|sc|groovy|gradle|m|mm|zig|nim|v|vb|tf|hcl|graphql|gql|proto|prisma|sql|sh|bash|zsh|fish|ps1|bat|cmd|env|toml|ini|cfg|conf|config|properties|log|dockerfile|editorconfig|gitignore|gitattributes|dockerignore|npmrc|nvmrc|eslintrc|prettierrc|babelrc|lock|plist)$/i
+
+export function attachmentKind(
+  mime: string,
+  name: string
+): "image" | "text" | "file" {
+  const normalized = mime.split(";")[0]?.trim().toLowerCase() || ""
+  if (VISION_IMAGE_TYPES.has(normalized)) {
+    return "image"
+  }
+  if (
+    normalized.startsWith("text/") ||
+    TEXT_MIME_TYPES.has(normalized) ||
+    TEXT_EXTENSION_RE.test(name)
+  ) {
+    return "text"
+  }
+  return "file"
+}
+
 export async function encodeAttachment(file: File): Promise<ChatAttachment> {
   const content_base64 = await fileToBase64(file)
   const mime = file.type || "application/octet-stream"
-  const kind = mime.startsWith("image/")
-    ? "image"
-    : mime.startsWith("text/") ||
-        /\.(txt|md|json|ya?ml|csv|xml|html?|css|js|ts|tsx|jsx|py)$/i.test(
-          file.name
-        )
-      ? "text"
-      : "file"
   return {
     id: `${file.name}-${file.size}-${file.lastModified}`,
     name: file.name,
     mime,
     size: file.size,
-    kind,
+    kind: attachmentKind(mime, file.name),
     content_base64,
   }
 }

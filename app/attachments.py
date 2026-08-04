@@ -12,6 +12,8 @@ from app.config import get_settings
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
+# Vision APIs (OpenAI / compatible) only accept these image MIME types.
+# Do not treat other image/* types (SVG, BMP, TIFF, HEIC, …) as vision images.
 IMAGE_TYPES = frozenset(
     {"image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"}
 )
@@ -23,12 +25,33 @@ TEXT_TYPES = frozenset(
         "text/html",
         "text/css",
         "text/javascript",
+        "text/typescript",
+        "text/x-python",
+        "text/x-script.python",
+        "text/x-java-source",
+        "text/x-c",
+        "text/x-c++src",
+        "text/x-golang",
+        "text/x-ruby",
+        "text/x-rust",
+        "text/x-php",
+        "text/x-shellscript",
+        "text/x-sql",
+        "text/tab-separated-values",
+        "text/xml",
         "application/json",
+        "application/ld+json",
         "application/xml",
+        "application/xhtml+xml",
         "application/x-yaml",
         "application/yaml",
         "application/javascript",
         "application/typescript",
+        "application/sql",
+        "application/graphql",
+        "application/x-sh",
+        "application/x-httpd-php",
+        "image/svg+xml",
     }
 )
 TEXT_EXTENSIONS = frozenset(
@@ -36,33 +59,120 @@ TEXT_EXTENSIONS = frozenset(
         ".txt",
         ".md",
         ".markdown",
+        ".mdx",
+        ".rst",
         ".csv",
+        ".tsv",
         ".json",
+        ".jsonl",
+        ".jsonc",
         ".yaml",
         ".yml",
         ".xml",
+        ".svg",
         ".html",
         ".htm",
+        ".xhtml",
         ".css",
+        ".scss",
+        ".sass",
+        ".less",
         ".js",
         ".jsx",
+        ".mjs",
+        ".cjs",
         ".ts",
         ".tsx",
+        ".vue",
+        ".svelte",
+        ".astro",
         ".py",
+        ".pyi",
         ".rb",
         ".go",
         ".rs",
         ".java",
         ".kt",
+        ".kts",
         ".swift",
         ".php",
+        ".phtml",
         ".sql",
         ".sh",
+        ".bash",
+        ".zsh",
+        ".fish",
+        ".ps1",
+        ".bat",
+        ".cmd",
         ".env",
         ".toml",
         ".ini",
         ".cfg",
+        ".conf",
+        ".config",
+        ".properties",
         ".log",
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cxx",
+        ".h",
+        ".hh",
+        ".hpp",
+        ".hxx",
+        ".cs",
+        ".fs",
+        ".fsx",
+        ".dart",
+        ".lua",
+        ".pl",
+        ".pm",
+        ".r",
+        ".rmd",
+        ".jl",
+        ".ex",
+        ".exs",
+        ".erl",
+        ".hrl",
+        ".clj",
+        ".cljs",
+        ".scala",
+        ".sc",
+        ".groovy",
+        ".gradle",
+        ".m",
+        ".mm",
+        ".zig",
+        ".nim",
+        ".v",
+        ".vb",
+        ".tf",
+        ".hcl",
+        ".graphql",
+        ".gql",
+        ".proto",
+        ".prisma",
+        ".dockerfile",
+        ".editorconfig",
+        ".gitignore",
+        ".gitattributes",
+        ".dockerignore",
+        ".npmrc",
+        ".nvmrc",
+        ".eslintrc",
+        ".prettierrc",
+        ".babelrc",
+        ".lock",
+        ".plist",
+    }
+)
+
+# Suffixes that look text-ish by name but are binary — never inline as text.
+BINARY_EXTENSIONS = frozenset(
+    {
+        ".wasm",
+        ".svgz",  # gzip-compressed SVG
     }
 )
 
@@ -81,13 +191,35 @@ def guess_mime(filename: str, content_type: str | None = None) -> str:
 
 
 def is_image(mime: str) -> bool:
-    return mime in IMAGE_TYPES or mime.startswith("image/")
+    """True only for vision-API-compatible image MIME types."""
+    return mime.split(";")[0].strip().lower() in IMAGE_TYPES
 
 
 def is_text_like(mime: str, filename: str) -> bool:
+    mime = mime.split(";")[0].strip().lower()
+    suffix = Path(filename).suffix.lower()
+    if suffix in BINARY_EXTENSIONS:
+        return False
     if mime in TEXT_TYPES or mime.startswith("text/"):
         return True
-    return Path(filename).suffix.lower() in TEXT_EXTENSIONS
+    # SVG often arrives as application/octet-stream from some browsers.
+    if suffix == ".svg":
+        return True
+    return suffix in TEXT_EXTENSIONS and suffix not in BINARY_EXTENSIONS
+
+
+def resolve_kind(mime: str, filename: str, hint: str | None = None) -> str:
+    """Classify attachment for the LLM, ignoring unsafe client image hints."""
+    if is_image(mime):
+        return "image"
+    if is_text_like(mime, filename):
+        return "text"
+    hint = (hint or "").strip().lower()
+    if hint == "text":
+        return "text"
+    # Clients often mark any image/* (including SVG) as "image". Only honor
+    # that hint when the MIME is vision-safe — already handled above.
+    return "file"
 
 
 def decode_attachment(att: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
@@ -109,16 +241,7 @@ def decode_attachment(att: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
             f"Attachment {name!r} exceeds max size "
             f"({settings.attachments_max_bytes} bytes)"
         )
-    kind = (
-        str(att.get("kind") or "")
-        or (
-            "image"
-            if is_image(mime)
-            else "text"
-            if is_text_like(mime, name)
-            else "file"
-        )
-    )
+    kind = resolve_kind(mime, name, str(att.get("kind") or "") or None)
     meta = {
         "id": str(att.get("id") or name),
         "name": name,
@@ -167,7 +290,6 @@ def build_human_content(
         name = att.get("name") or "file"
         mime = att.get("mime") or "application/octet-stream"
         size = int(att.get("size") or 0)
-        kind = att.get("kind") or "file"
         data: bytes | None = att.get("_bytes")
         if data is None and att.get("content_base64"):
             try:
@@ -175,17 +297,20 @@ def build_human_content(
             except Exception:  # noqa: BLE001
                 data = None
         aid = att.get("id") or name
+        kind = resolve_kind(mime, str(name), str(att.get("kind") or "") or None)
 
-        if (kind == "image" or is_image(mime)) and data:
+        if kind == "image" and data:
+            # Normalize jpeg alias for providers that reject image/jpg.
+            vision_mime = "image/jpeg" if mime == "image/jpg" else mime
             b64 = base64.b64encode(data).decode("ascii")
             image_parts.append(
                 {
                     "type": "image_url",
-                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                    "image_url": {"url": f"data:{vision_mime};base64,{b64}"},
                 }
             )
             notes.append(f"- image `{name}` (id=`{aid}`, {mime}, {size} bytes)")
-        elif (kind == "text" or is_text_like(mime, name)) and data:
+        elif kind == "text" and data:
             body = text_from_bytes(data, max_chars=8_000)
             notes.append(
                 f"- text file `{name}` (id=`{aid}`, {mime}, {size} bytes):\n"
