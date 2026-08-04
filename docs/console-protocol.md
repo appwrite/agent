@@ -130,6 +130,36 @@ export type ConsoleAction =
       /** Optional column hints for table layout; `key` should match `fields` keys */
       columns?: Array<{ key: string; label: string }>
     }
+  | {
+      /**
+       * Usage chart from usage_list_events / usage_list_gauges.
+       * Prefer passing `metrics` straight through from the usage API response.
+       */
+      type: 'chart'
+      title: string
+      description?: string
+      /** Visual: area (default, time series) or bar (categorical / breakdown) */
+      chartType?: 'area' | 'bar'
+      /** `events` zero-fills; `gauges` carry-forward. Default events. */
+      kind?: 'events' | 'gauges'
+      /** Unit next to the total, e.g. "requests" */
+      unitLabel?: string
+      axisFormat?: 'count' | 'bytes' | 'gbhours'
+      /**
+       * Bucket size from the usage API (`1m`, `15m`, `30m`, `1h`, `1d`).
+       * Always set for time-series / "last N hours" questions.
+       */
+      interval?: string
+      startAt?: string
+      endAt?: string
+      changePercent?: number
+      href?: string
+      projectId?: string
+      metrics: Array<{
+        metric: string
+        points: Array<{ time: string; value: number; label?: string }>
+      }>
+    }
   | { type: 'refresh'; scopes: string[] }
 ```
 
@@ -386,6 +416,65 @@ Each **item** uses the shared `ConsoleResourceItem` shape:
 
 ---
 
+### `chart`
+
+Render a usage chart from `usage_list_events` / `usage_list_gauges` data. The Console draws it with the shared usage charts library (area or bar).
+
+| Field | Required | Notes |
+|-------|----------|--------|
+| `title` | yes | Chart heading |
+| `metrics` | yes | Non-empty array; prefer pass-through from the usage API `metrics[]` |
+| `metrics[].metric` | yes | Exact metric id (see table below) |
+| `metrics[].points` | yes | `{ time, value }` points from the usage API |
+| `interval` | for time series | `1m` / `15m` / `30m` / `1h` / `1d` — **always set** for "last 24h" / trend questions |
+| `startAt` / `endAt` | recommended | ISO 8601 window passed to the usage tool |
+| `unitLabel` | no | Display unit next to the total (e.g. `"requests"`) |
+| `chartType` | no | `area` (default) or `bar` (breakdowns / labeled points) |
+| `kind` | no | `events` (default) or `gauges` |
+| `axisFormat` | no | `count` / `bytes` / `gbhours` |
+| `changePercent` | no | Vs previous period |
+| `href` / `projectId` | no | Deep link to Console usage |
+
+**Canonical metric ids (do not invent short aliases):**
+
+| User asks about | Metric id | Tool |
+|-----------------|-----------|------|
+| API / network requests | **`network.requests`** | `usage_list_events` |
+| Function executions | `executions` or `functions.executions` | `usage_list_events` |
+| Bandwidth | `network.inbound` / `network.outbound` | `usage_list_events` |
+| Storage total | `storage` / `files.storage` | `usage_list_gauges` |
+| MAU | `users.mau` | `usage_list_gauges` |
+
+Never use bare `requests` for API request counts — that is not the Console metric and returns empty/zero data. Use **`network.requests`**.
+
+```json
+{
+  "type": "chart",
+  "title": "Requests (last 24 hours)",
+  "unitLabel": "requests",
+  "interval": "1h",
+  "startAt": "2026-08-03T08:00:00.000Z",
+  "endAt": "2026-08-04T08:00:00.000Z",
+  "projectId": "64abc",
+  "metrics": [
+    {
+      "metric": "network.requests",
+      "points": [
+        { "time": "2026-08-04T08:00:00+00:00", "value": 49 }
+      ]
+    }
+  ]
+}
+```
+
+**Agent rules:**
+1. Call `usage_list_events` (or gauges) with the **exact** metric id from the table (e.g. `network.requests`).
+2. For time series / "last N hours/days", always pass `interval` (prefer `1h` for 24h, `1d` for multi-day). Flat aggregates (`interval` omitted) are only for single-number totals when the user does not want a chart.
+3. After a successful usage tool result, call `console` with `type=chart`. Pass `metrics` through from the tool response; include `interval`, `startAt`, `endAt`, and `projectId`.
+4. Keep the spoken answer short (“49 requests in the last 24 hours.”) — do not paste the series as markdown.
+
+---
+
 ### `refresh`
 
 
@@ -491,6 +580,37 @@ User: “List my databases.”
 
 3. Text answer: “You have 2 databases.” (no markdown table).
 
+### Usage chart (API requests last 24 hours)
+
+1. `current_time` → compute `start_at` / `end_at` for the last 24 hours.
+2. MCP `usage_list_events` with `metrics: ["network.requests"]`, `interval: "1h"`, and the window.
+3. Agent calls `console`:
+
+```json
+{
+  "protocol": "appwrite.console/v1",
+  "actions": [
+    {
+      "type": "chart",
+      "title": "Requests (last 24 hours)",
+      "unitLabel": "requests",
+      "interval": "1h",
+      "startAt": "2026-08-03T08:00:00.000Z",
+      "endAt": "2026-08-04T08:00:00.000Z",
+      "projectId": "64abc",
+      "metrics": [
+        {
+          "metric": "network.requests",
+          "points": [{ "time": "2026-08-04T08:00:00+00:00", "value": 49 }]
+        }
+      ]
+    }
+  ]
+}
+```
+
+4. Text answer: “There were 49 API requests in the last 24 hours.” (no markdown series).
+
 ---
 
 ## Console implementation checklist
@@ -499,9 +619,10 @@ User: “List my databases.”
 2. Reuse Command Center handlers where they already exist (`onSetTheme`, `onProjectCreate`, `onToggleTerminal`, `onOpenConnectMcp`, `navigate`).
 3. For `resource`, render a card (or feed `ConversationResourceSummary`) from the payload — do not re-classify from the tool name.
 4. For `resource_list`, render an inline filterable list/table with per-row links; do not fall back to parsing agent markdown.
-5. For `refresh`, invalidate the listed scopes / query keys.
-6. Treat validation-error strings (`Error: invalid console actions — …`) as failed tool calls; show nothing in the shell.
-7. Keep turn timeline UI (`status`, `route`, `tool_*`, …) separate from these shell side-effects.
+5. For `chart`, render with the Console usage charts library from `metrics` / `interval` / `startAt` / `endAt`.
+6. For `refresh`, invalidate the listed scopes / query keys.
+7. Treat validation-error strings (`Error: invalid console actions — …`) as failed tool calls; show nothing in the shell.
+8. Keep turn timeline UI (`status`, `route`, `tool_*`, …) separate from these shell side-effects.
 
 ---
 

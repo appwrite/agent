@@ -11,7 +11,7 @@ POC agent engine for Appwrite Cloud `/v1/agent`, built on [LangGraph](https://gi
 - **Safe tools by default** — no host shell for the model
 - Tools: `calculator`, `current_time`, `web_search`, `browser_fetch`, `appwrite_skill`, `sandbox_exec` stub, **`console`** (Console UI protocol), plus MCP tools from credentials on the turn
 - FastAPI + shadcn chat UI
-- **[Console protocol](docs/console-protocol.md)** (`appwrite.console/v1`) — agent → Console metadata for theme, navigation, toasts, and resource cards
+- **[Console protocol](docs/console-protocol.md)** (`appwrite.console/v1`) — agent → Console metadata for theme, navigation, toasts, resource cards, lists, and usage charts
 
 ## Agent architecture
 
@@ -50,7 +50,7 @@ flowchart TD
 
 **Shared tools:** `calculator`, `current_time`, `web_search`, `browser_fetch`, `sandbox_exec` (stub), `console` (UI protocol). MCP tools from `mcp_connections` are attached to every subagent; create mutations are write-guarded (dedupe / `already_exists` recovery).
 
-**Console protocol.** After MCP create/update/delete (or when the user asks to change theme / navigate / open a dialog), agents call the `console` tool with a JSON action list. For list/query answers (databases, users, …) they emit `resource_list` instead of markdown tables. The tool returns an `appwrite.console/v1` envelope on `tool_end`; the Console parses it into cards, lists, and shell side-effects. See [docs/console-protocol.md](docs/console-protocol.md).
+**Console protocol.** After MCP create/update/delete (or when the user asks to change theme / navigate / open a dialog), agents call the `console` tool with a JSON action list. For list/query answers (databases, users, …) they emit `resource_list` instead of markdown tables. For usage metrics they emit `chart` (e.g. metric `network.requests` with an `interval`). The tool returns an `appwrite.console/v1` envelope on `tool_end`; the Console parses it into cards, lists, and shell side-effects. See [docs/console-protocol.md](docs/console-protocol.md).
 
 **Turn shape:** route once → stream one subagent → optional planner fallback → `done`. History is trimmed to the last 12 turns server-side. No durable graph checkpoint — Cloud/proxy owns conversation state.
 

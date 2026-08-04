@@ -47,14 +47,21 @@ ACTION_TYPES = frozenset(
         "scroll_to_card",
         "resource",
         "resource_list",
+        "chart",
         "refresh",
     }
 )
+
+CHART_TYPES = frozenset({"area", "bar"})
+CHART_KINDS = frozenset({"events", "gauges"})
+CHART_AXIS_FORMATS = frozenset({"count", "bytes", "gbhours"})
 
 MAX_ACTIONS = 20
 MAX_LIST_ITEMS = 50
 MAX_METADATA = 20
 MAX_COLUMNS = 12
+MAX_CHART_METRICS = 10
+MAX_CHART_POINTS = 5000
 FIELD_VALUE_TYPES = (str, int, float, bool, type(None))
 
 
@@ -352,6 +359,9 @@ def validate_action(raw: Any) -> dict[str, Any]:
             out["columns"] = columns
         return out
 
+    if action_type == "chart":
+        return _validate_chart_action(raw)
+
     if action_type == "refresh":
         scopes = raw.get("scopes")
         if not isinstance(scopes, list) or not scopes:
@@ -368,6 +378,101 @@ def validate_action(raw: Any) -> dict[str, Any]:
         return {"type": "refresh", "scopes": cleaned}
 
     raise ConsoleProtocolError(f"unhandled type {action_type!r}")
+
+
+def _validate_chart_point(raw: Any, *, context: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ConsoleProtocolError(f"{context} must be an object")
+    time = raw.get("time")
+    if not isinstance(time, str) or not time.strip():
+        raise ConsoleProtocolError(f"{context}.time must be a non-empty string")
+    value = raw.get("value")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConsoleProtocolError(f"{context}.value must be a number")
+    out: dict[str, Any] = {"time": time.strip(), "value": float(value)}
+    label = raw.get("label")
+    if label is not None:
+        if not isinstance(label, str):
+            raise ConsoleProtocolError(f"{context}.label must be a string")
+        text = label.strip()
+        if text:
+            out["label"] = text
+    return out
+
+
+def _validate_chart_metric(raw: Any, *, context: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ConsoleProtocolError(f"{context} must be an object")
+    metric = raw.get("metric")
+    if not isinstance(metric, str) or not metric.strip():
+        raise ConsoleProtocolError(f"{context}.metric must be a non-empty string")
+    points_raw = raw.get("points")
+    if not isinstance(points_raw, list):
+        raise ConsoleProtocolError(f"{context}.points must be an array")
+    if len(points_raw) > MAX_CHART_POINTS:
+        raise ConsoleProtocolError(
+            f"{context}.points: at most {MAX_CHART_POINTS} points"
+        )
+    points = [
+        _validate_chart_point(point, context=f"{context}.points[{idx}]")
+        for idx, point in enumerate(points_raw)
+    ]
+    return {"metric": metric.strip(), "points": points}
+
+
+def _validate_chart_action(raw: dict[str, Any]) -> dict[str, Any]:
+    metrics_raw = raw.get("metrics")
+    if not isinstance(metrics_raw, list) or not metrics_raw:
+        raise ConsoleProtocolError(
+            "chart.metrics must be a non-empty array"
+        )
+    if len(metrics_raw) > MAX_CHART_METRICS:
+        raise ConsoleProtocolError(
+            f"chart.metrics: at most {MAX_CHART_METRICS} series"
+        )
+    metrics = [
+        _validate_chart_metric(item, context=f"chart.metrics[{idx}]")
+        for idx, item in enumerate(metrics_raw)
+    ]
+    out: dict[str, Any] = {
+        "type": "chart",
+        "title": _require_str(raw, "title"),
+        "metrics": metrics,
+    }
+    for key in ("description", "unitLabel", "interval", "startAt", "endAt", "href", "projectId"):
+        value = _optional_str(raw, key)
+        if value is not None:
+            out[key] = value
+    chart_type = _optional_str(raw, "chartType")
+    if chart_type is not None:
+        normalized = chart_type.lower()
+        if normalized not in CHART_TYPES:
+            raise ConsoleProtocolError(
+                f"chart.chartType must be one of {sorted(CHART_TYPES)}"
+            )
+        out["chartType"] = normalized
+    kind = _optional_str(raw, "kind")
+    if kind is not None:
+        normalized = kind.lower()
+        if normalized not in CHART_KINDS:
+            raise ConsoleProtocolError(
+                f"chart.kind must be one of {sorted(CHART_KINDS)}"
+            )
+        out["kind"] = normalized
+    axis_format = _optional_str(raw, "axisFormat")
+    if axis_format is not None:
+        normalized = axis_format.lower()
+        if normalized not in CHART_AXIS_FORMATS:
+            raise ConsoleProtocolError(
+                f"chart.axisFormat must be one of {sorted(CHART_AXIS_FORMATS)}"
+            )
+        out["axisFormat"] = normalized
+    change = raw.get("changePercent")
+    if change is not None:
+        if isinstance(change, bool) or not isinstance(change, (int, float)):
+            raise ConsoleProtocolError("chart.changePercent must be a number")
+        out["changePercent"] = float(change)
+    return out
 
 
 def parse_actions_arg(actions: str | list | dict) -> list[dict[str, Any]]:

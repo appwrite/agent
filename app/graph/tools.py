@@ -279,22 +279,30 @@ def console(
         "Appwrite Console UI. Each object needs a `type` plus type-specific "
         "fields. Types: set_theme, navigate, open_create, open_dialog, toast, "
         "show_pane, toggle_terminal, scroll_to_card, resource, resource_list, "
-        "refresh. "
+        "chart, refresh. "
         "Examples: "
         '[{"type":"set_theme","theme":"dark"}] or '
         '[{"type":"resource_list","resourceType":"database","items":['
         '{"resourceId":"main","title":"Main","href":"/project/x/databases/main"}]}] or '
         '[{"type":"resource","mutation":"create","resourceType":"database",'
-        '"resourceId":"db1","title":"Main DB"}]. '
+        '"resourceId":"db1","title":"Main DB"}] or '
+        '[{"type":"chart","title":"Requests (last 24 hours)","unitLabel":"requests",'
+        '"interval":"1h","metrics":[{"metric":"network.requests","points":'
+        '[{"time":"2026-08-04T08:00:00Z","value":49}]}]}]. '
+        "For usage charts: after usage_list_events/gauges, emit type=chart and "
+        "pass metrics through. API request counts use metric network.requests "
+        "(never bare requests). Always set interval for time series. "
         "Full contract: docs/console-protocol.md (protocol appwrite.console/v1).",
     ],
 ) -> str:
-    """Post UI metadata to the Appwrite Console (theme, nav, lists, resource cards).
+    """Post UI metadata to the Appwrite Console (theme, nav, lists, charts, resource cards).
 
     Does NOT create/update/delete Appwrite resources — use MCP for that, then call
     console with type=resource so the Console can render a card. For list/query
     results (databases, users, buckets, …) use type=resource_list — never dump the
-    list as markdown. Unknown action types are rejected. The tool result is the
+    list as markdown. For usage_list_events / usage_list_gauges results use
+    type=chart (metric network.requests for API requests; always set interval for
+    time series). Unknown action types are rejected. The tool result is the
     canonical JSON envelope the Console parses from the tool_end output.
     """
     try:
