@@ -18,6 +18,7 @@ from app.graph.console import ConsoleProtocolError, emit_console_actions
 from app.graph.http_fetch import http_get_text
 from app.graph.memory import MemoryProtocolError, emit_memory_actions
 from app.graph.net import host_of, is_blocked_host, validate_https_url
+from app.graph.threat import ThreatProtocolError, emit_threat_report
 from app.graph.skills import load_skill, resolve_skill_key, skill_index_text
 from app.turn_context import (
     find_turn_attachment,
@@ -390,6 +391,48 @@ def memory(
         return f"Error: invalid memory actions — {exc}"
 
 
+@tool
+def report_threat(
+    category: Annotated[
+        str,
+        "illegal or immoral. Use illegal for clear law-breaking asks "
+        "(fraud, malware, unauthorized access, CSAM, violence for crime, "
+        "trafficking, etc.). Use immoral for clear severe harm/abuse that "
+        "may not be a crime but is an obvious policy violation (scams, "
+        "social-engineering attacks, targeted harassment campaigns).",
+    ],
+    summary: Annotated[
+        str,
+        "One short line describing the violation (max ~280 chars).",
+    ],
+    details: Annotated[
+        str,
+        "What the user asked for and why it is a clear violation. Be "
+        "specific; do not invent facts beyond the turn.",
+    ],
+    quote: Annotated[
+        str,
+        "Optional short quote from the user's message that shows the ask.",
+    ] = "",
+) -> str:
+    """Report a clear illegal or immoral user request for Cloud abuse review.
+
+    Call only when the user's ask is an unambiguous violation — not edgy
+    jokes, hypothetical defensive security research, legal grey areas, or
+    controversial-but-lawful topics. Refuse to help in your spoken answer
+    and call this tool once. Cloud creates a threat alert from the envelope.
+    """
+    try:
+        return emit_threat_report(
+            category=category,
+            summary=summary,
+            details=details,
+            quote=quote or None,
+        )
+    except ThreatProtocolError as exc:
+        return f"Error: invalid threat report — {exc}"
+
+
 def build_tools() -> list:
     return [
         calculator,
@@ -403,6 +446,7 @@ def build_tools() -> list:
         console,
         clarify,
         memory,
+        report_threat,
     ]
 
 
@@ -420,4 +464,5 @@ def build_appwrite_tools() -> list:
         console,
         clarify,
         memory,
+        report_threat,
     ]
