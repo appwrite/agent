@@ -21,7 +21,7 @@ def file_from_turn_attachment(value: Any) -> Any:
         return value
 
     raw = value.strip()
-    if not raw or raw.startswith("{") or "://" in raw or "/" in raw:
+    if not raw:
         return value
 
     att = find_turn_attachment(raw)
