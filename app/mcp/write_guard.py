@@ -27,6 +27,8 @@ from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
 
+from app.attachment_upload import resolve_file_arguments
+
 logger = logging.getLogger(__name__)
 
 _ALPHABET = string.ascii_lowercase + string.digits
@@ -311,12 +313,13 @@ def _normalize_query_item(item: Any) -> Any:
 def _normalize_arguments(arguments: Any) -> Any:
     if not isinstance(arguments, dict):
         return arguments
-    queries = arguments.get("queries")
+    out = resolve_file_arguments(arguments)
+    queries = out.get("queries")
     if not isinstance(queries, list):
-        return arguments
-    out = dict(arguments)
-    out["queries"] = [_normalize_query_item(item) for item in queries]
-    return out
+        return out
+    normalized = dict(out)
+    normalized["queries"] = [_normalize_query_item(item) for item in queries]
+    return normalized
 
 
 def _tool_name_from_payload(payload: dict[str, Any]) -> str:
