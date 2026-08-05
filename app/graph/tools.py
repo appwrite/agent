@@ -203,7 +203,12 @@ def read_attachment(
         "Max characters to return for text-like files (default 12000)",
     ] = 12_000,
 ) -> str:
-    """Read an attachment from the current request (stateless; this turn only)."""
+    """Read an attachment from the current request (stateless; this turn only).
+
+    For Storage uploads, pass the attachment id/filename as storage_create_file's
+    `file` argument instead — the engine resolves it. Use this tool to inspect
+    text/content, not as a required step before uploading.
+    """
     att = find_turn_attachment(attachment_id)
     if not att:
         return (
@@ -339,10 +344,14 @@ def clarify(
 ) -> str:
     """Ask the user a structured follow-up in the Console (choices, confirm, text).
 
-    Use when required details are missing or before destructive deletes — do not
-    guess IDs, permissions, or unique(). After a successful call, stop mutating
-    this turn; wait for the user's next message with answers. The tool result is
-    the canonical JSON envelope the Console parses from tool_end.
+    Use when a required detail is missing or before destructive deletes. Do not
+    guess permissions or invent slug IDs. Prefer unique() without clarifying for
+    routine creates/uploads (especially file_id when attachments are present).
+    Never use a choice of \"auto vs custom ID\" — that cannot collect a custom
+    value; use kind=text with defaultValue unique() if the user must pick an ID.
+    After a successful call, stop mutating this turn; wait for the user's next
+    message with answers. The tool result is the canonical JSON envelope the
+    Console parses from tool_end.
     """
     try:
         return emit_clarify_prompts(prompts, title=title or None)
