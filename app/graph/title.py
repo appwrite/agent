@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -41,12 +42,16 @@ async def generate_conversation_title(
     *,
     user_message: str,
     assistant_message: str = "",
-) -> str:
-    """Ask the chat model for a concise topic title."""
+) -> tuple[str, Any]:
+    """Ask the chat model for a concise topic title.
+
+    Returns `(title, raw_message)` so callers can read token usage from the
+    underlying AIMessage when present.
+    """
     user = (user_message or "").strip()
     assistant = (assistant_message or "").strip()
     if not user and not assistant:
-        return ""
+        return "", None
 
     settings = get_settings()
     llm = _make_llm(settings).bind(max_tokens=24)
@@ -62,4 +67,4 @@ async def generate_conversation_title(
             HumanMessage(content=prompt),
         ]
     )
-    return _sanitize_title(content_to_text(result.content))
+    return _sanitize_title(content_to_text(result.content)), result

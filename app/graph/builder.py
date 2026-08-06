@@ -244,6 +244,8 @@ def _make_llm(settings: Settings, override: dict | None = None) -> ChatOpenAI:
     kwargs: dict = {
         "model": model,
         "api_key": api_key,
+        # Required so streamed turns expose usage_metadata on on_chat_model_end.
+        "stream_usage": True,
     }
 
     if _model_allows_custom_temperature(model):

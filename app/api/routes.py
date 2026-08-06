@@ -132,7 +132,7 @@ async def title(body: TitleRequest):
         raise HTTPException(status_code=503, detail="LLM_API_KEY is not configured")
     from app.graph.title import generate_conversation_title
 
-    generated = await generate_conversation_title(
+    generated, _raw = await generate_conversation_title(
         user_message=body.message,
         assistant_message=body.assistant_message,
     )

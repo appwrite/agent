@@ -54,6 +54,62 @@ def _preview(value: Any, limit: int) -> str:
     return text
 
 
+def _usage_event(
+    *,
+    model: str,
+    source: Any,
+    agent: str | None = None,
+) -> dict[str, Any] | None:
+    """Build an SSE usage event from LangChain usage_metadata / token_usage."""
+    usage: dict[str, Any] = {}
+    if source is None:
+        return None
+    if isinstance(source, dict):
+        usage = (
+            source.get("usage_metadata")
+            or source.get("token_usage")
+            or source.get("usage")
+            or source
+        )
+    else:
+        usage = getattr(source, "usage_metadata", None) or {}
+        if not usage:
+            meta = getattr(source, "response_metadata", None) or {}
+            if isinstance(meta, dict):
+                usage = meta.get("token_usage") or meta.get("usage") or {}
+    if not isinstance(usage, dict):
+        return None
+
+    prompt = int(
+        usage.get("input_tokens")
+        or usage.get("prompt_tokens")
+        or usage.get("promptTokens")
+        or 0
+    )
+    completion = int(
+        usage.get("output_tokens")
+        or usage.get("completion_tokens")
+        or usage.get("completionTokens")
+        or 0
+    )
+    total = int(usage.get("total_tokens") or usage.get("totalTokens") or 0)
+    if total <= 0:
+        total = prompt + completion
+    if prompt <= 0 and completion <= 0 and total <= 0:
+        return None
+
+    event: dict[str, Any] = {
+        "type": "usage",
+        "model": model,
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+    }
+    if agent:
+        event["agent"] = agent
+    return event
+
+
 def _looks_like_content_blocks(value: list[Any]) -> bool:
     first = value[0]
     if isinstance(first, dict):
@@ -100,6 +156,8 @@ async def _stream_subagent(
     agent,
     agent_name: str,
     messages: list,
+    *,
+    model: str,
 ) -> AsyncIterator[dict[str, Any]]:
     settings = get_settings()
     tool_input_limit = settings.stream_tool_input_chars
@@ -135,6 +193,12 @@ async def _stream_subagent(
                     "agent": agent_name,
                     "content": piece,
                 }
+
+        elif kind == "on_chat_model_end":
+            output = data.get("output")
+            usage = _usage_event(model=model, source=output, agent=agent_name)
+            if usage is not None:
+                yield usage
 
         elif kind == "on_tool_start":
             tool_calls += 1
@@ -208,6 +272,11 @@ async def run_turn_stream(
     """
     settings = get_settings()
     llm = _make_llm(settings, llm_override)
+    model_name = str(
+        (llm_override or {}).get("model")
+        or settings.llm_model
+        or settings.chat_model
+    )
     normalized = normalize_attachments(attachments)
     set_turn_attachments(normalized)
     begin_turn_write_guard()
@@ -224,7 +293,7 @@ async def run_turn_stream(
     tools = [*build_tools(), *mcp_tools]
     platform_tools = [*build_appwrite_tools(), *mcp_tools]
 
-    router = llm.with_structured_output(Route)
+    router = llm.with_structured_output(Route, include_raw=True)
     researcher = create_react_agent(llm, tools=tools, prompt=RESEARCHER_PROMPT)
     planner = create_react_agent(llm, tools=tools, prompt=PLANNER_PROMPT)
     platform = create_react_agent(llm, tools=platform_tools, prompt=PLATFORM_PROMPT)
@@ -234,12 +303,28 @@ async def run_turn_stream(
     conversation = [*prior, human]
 
     yield {"type": "status", "message": "Routing request…"}
-    decision = await router.ainvoke(
+    routed = await router.ainvoke(
         [
             SystemMessage(content=SUPERVISOR_PROMPT),
             *conversation,
         ]
     )
+    if isinstance(routed, dict):
+        decision = routed.get("parsed") or routed.get("raw")
+        raw_message = routed.get("raw")
+        usage = _usage_event(model=model_name, source=raw_message, agent="supervisor")
+        if usage is not None:
+            yield usage
+    else:
+        decision = routed
+
+    if not isinstance(decision, Route):
+        yield {
+            "type": "error",
+            "detail": "Supervisor returned an unusable route decision",
+        }
+        return
+
     next_agent = decision.next
     reason = (decision.reason or "").strip() or f"Routed to {next_agent}"
     yield {
@@ -276,7 +361,7 @@ async def run_turn_stream(
     messages = [SystemMessage(content=f"Task focus: {reason}"), *conversation]
 
     final_text = ""
-    async for event in _stream_subagent(agent, next_agent, messages):
+    async for event in _stream_subagent(agent, next_agent, messages, model=model_name):
         if event.get("type") == "final":
             final_text = str(event.get("content") or "")
             continue
@@ -306,7 +391,9 @@ async def run_turn_stream(
             ),
             *conversation,
         ]
-        async for event in _stream_subagent(planner, "planner", fallback_messages):
+        async for event in _stream_subagent(
+            planner, "planner", fallback_messages, model=model_name
+        ):
             if event.get("type") == "final":
                 final_text = str(event.get("content") or "")
                 continue
@@ -326,11 +413,18 @@ async def _maybe_title_event(
     if prior:
         return
     try:
-        title = await generate_conversation_title(
+        title, raw = await generate_conversation_title(
             user_message=user_message,
             assistant_message=assistant_message,
         )
     except Exception:  # noqa: BLE001
         return
+    usage = _usage_event(
+        model=get_settings().llm_model,
+        source=raw,
+        agent="title",
+    )
+    if usage is not None:
+        yield usage
     if title:
         yield {"type": "conversation_title", "title": title}
