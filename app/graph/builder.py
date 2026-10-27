@@ -110,8 +110,10 @@ Workflow:
    do not invent APIs and do not load more skills.
 5) Prefer modern Appwrite APIs (TablesDB / current SDK shapes from the skill).
 6) MCP live ops: always appwrite_search_tools first; call only exact tool_name
-   values from search (never invent names). Pass only required args unless the
-   search/schema shows optionals. Omit permissions unless the user asks; when
+   values from search (never invent names), through the call_tool each match
+   names: reads via appwrite_call_tool, creates/updates/deletes via
+   appwrite_call_write_tool with confirm_write=true. Pass only required args
+   unless the search/schema shows optionals. Omit permissions unless the user asks; when
    set, use Appwrite permission strings like read("any") / update("users"), not
    role:member or {{read/write}} objects. service_hints must be catalog service
    names (storage, organization, project) - not plurals like "projects".

@@ -12,6 +12,13 @@ StructuredTool and drops tool_end from the stream.
 Create dedupe is keyed by concrete resource ids (not tool name alone), so
 "create 5 users" with user_id=unique() can run five times. Shared unique()
 slots still link foreign keys across tools (database_id on create then table).
+
+The Appwrite MCP server runs reads through appwrite_call_tool and every
+mutation through appwrite_call_write_tool, and refuses a call made through the
+other one. Both call tools of a server share one guard, so creates are deduped
+whichever tool carries them, and 409 recovery reads the existing resource
+through appwrite_call_tool. Servers that predate the split expose only
+appwrite_call_tool, which then carries both.
 """
 
 from __future__ import annotations
@@ -23,6 +30,8 @@ import logging
 import re
 import secrets
 import string
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
@@ -32,6 +41,12 @@ from app.attachment_upload import resolve_file_arguments
 logger = logging.getLogger(__name__)
 
 _ALPHABET = string.ascii_lowercase + string.digits
+
+READ_TOOL = "appwrite_call_tool"
+WRITE_TOOL = "appwrite_call_write_tool"
+CALL_TOOLS = frozenset({READ_TOOL, WRITE_TOOL})
+
+Coroutine = Callable[..., Awaitable[Any]]
 
 _ALREADY_EXISTS_RE = re.compile(
     r"already_exists|already exists|code=409", re.IGNORECASE
@@ -405,7 +420,7 @@ def _is_already_exists(text: str) -> bool:
 
 
 async def _recover_existing(
-    original,
+    read: Coroutine,
     *,
     payload: dict[str, Any],
     create_tool: str,
@@ -426,7 +441,7 @@ async def _recover_existing(
             get_payload[key] = payload[key]
 
     try:
-        fetched = await original(**get_payload)
+        fetched = await read(**get_payload)
     except Exception as exc:  # noqa: BLE001
         logger.info("409 recovery get failed for %s: %s", create_tool, exc)
         return None
@@ -447,21 +462,48 @@ async def _recover_existing(
     )
 
 
-def wrap_mcp_tool(tool: BaseTool) -> BaseTool:
-    """Attach error handling + create dedupe to an MCP-backed tool."""
-    tool.handle_tool_error = True
-    if tool.name != "appwrite_call_tool" or not isinstance(tool, StructuredTool):
-        return tool
+@dataclass
+class _Guard:
+    """Create dedupe state shared by a server's call tools for one turn
+    (tools_from_connections rebuilds the tools each turn)."""
 
-    original = tool.coroutine
-    if original is None:
-        return tool
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    unique_ids: dict[str, str] = field(default_factory=dict)
+    create_attempts: dict[str, int] = field(default_factory=dict)
+    create_results: dict[str, str] = field(default_factory=dict)
 
-    # Per wrapped instance (== per turn, tools_from_connections rebuilds each turn).
-    lock = asyncio.Lock()
-    unique_ids: dict[str, str] = {}
-    create_attempts: dict[str, int] = {}
-    create_results: dict[str, str] = {}
+
+def wrap_mcp_tools(tools: list[BaseTool]) -> list[BaseTool]:
+    """Attach error handling to one MCP server's tools, and create dedupe plus
+    409 recovery to its call tools."""
+    for tool in tools:
+        tool.handle_tool_error = True
+
+    calls = {
+        tool.name: tool
+        for tool in tools
+        if tool.name in CALL_TOOLS
+        and isinstance(tool, StructuredTool)
+        and tool.coroutine is not None
+    }
+    if not calls:
+        return tools
+
+    # Captured before wrapping: recovery reads must not pass through the guard.
+    reader = calls[READ_TOOL].coroutine if READ_TOOL in calls else None
+    guard = _Guard()
+    for tool in calls.values():
+        original = tool.coroutine
+        assert original is not None
+        tool.coroutine = _guarded(original, reader or original, guard)
+    return tools
+
+
+def _guarded(original: Coroutine, read: Coroutine, guard: _Guard) -> Coroutine:
+    lock = guard.lock
+    unique_ids = guard.unique_ids
+    create_attempts = guard.create_attempts
+    create_results = guard.create_results
 
     async def guarded_coroutine(**kwargs: Any) -> Any:
         payload = dict(kwargs)
@@ -519,7 +561,7 @@ def wrap_mcp_tool(tool: BaseTool) -> BaseTool:
 
             if is_create and _is_already_exists(text):
                 recovered = await _recover_existing(
-                    original,
+                    read,
                     payload=payload,
                     create_tool=tool_name,
                     arguments=payload.get("arguments"),
@@ -550,5 +592,4 @@ def wrap_mcp_tool(tool: BaseTool) -> BaseTool:
                 return _content_and_artifact(text, result)
             return _content_and_artifact(text)
 
-    tool.coroutine = guarded_coroutine
-    return tool
+    return guarded_coroutine

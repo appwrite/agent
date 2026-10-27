@@ -189,7 +189,7 @@ def appwrite_skill(
             f"Skill {key!r} was already loaded earlier this turn. "
             "Reuse that content — do not call appwrite_skill again for it. "
             "For live project mutations use MCP tools (appwrite_search_tools → "
-            "appwrite_call_tool), not CLI/SDK skill guides."
+            "appwrite_call_write_tool), not CLI/SDK skill guides."
         )
     content = load_skill(key)
     mark_skill_loaded(key)

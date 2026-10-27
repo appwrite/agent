@@ -10,7 +10,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from app.mcp.registry import McpServerDef, list_servers, resolve_server
 from app.mcp.storage import MemoryTokenStorage
-from app.mcp.write_guard import wrap_mcp_tool
+from app.mcp.write_guard import wrap_mcp_tools
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ class McpManager:
                     server, access_token=access_token
                 )
                 # Error→ToolMessage + turn-scoped create dedupe (see write_guard).
-                tools.extend(wrap_mcp_tool(tool) for tool in loaded)
+                tools.extend(wrap_mcp_tools(loaded))
                 exported = storage.export()
                 updated.append(
                     {
