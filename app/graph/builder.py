@@ -211,7 +211,7 @@ Return a concise result the supervisor can finish with.
 
 
 def _is_openai_reasoning_model(model: str) -> bool:
-    """True for OpenAI reasoning models (gpt-5* except gpt-5-chat*, o-series).
+    """True for OpenAI reasoning models (gpt-5* except gpt-5-chat*, gpt-6*, o-series).
 
     These models reject custom temperature and cannot use function tools on
     /v1/chat/completions unless reasoning_effort is none — use /v1/responses instead.
@@ -219,7 +219,7 @@ def _is_openai_reasoning_model(model: str) -> bool:
     name = model.rsplit("/", 1)[-1].strip().lower()
     if name.startswith("gpt-5-chat"):
         return False
-    if name.startswith("gpt-5"):
+    if name.startswith("gpt-5") or name.startswith("gpt-6"):
         return True
     if len(name) >= 2 and name[0] == "o" and name[1].isdigit():
         return True
@@ -253,7 +253,7 @@ def _make_llm(settings: Settings, override: dict | None = None) -> ChatOpenAI:
         kwargs["temperature"] = 0.2 if temperature is None else temperature
     else:
         # Function tools + default reasoning_effort 400 on chat.completions for
-        # gpt-5.6 / o-series; Responses API is the supported path.
+        # gpt-5 / gpt-6 / o-series; Responses API is the supported path.
         kwargs["use_responses_api"] = True
 
     base_url = override.get("base_url") or settings.llm_base_url
