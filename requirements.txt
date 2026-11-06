@@ -2,10 +2,10 @@ fastapi==0.116.1
 uvicorn[standard]==0.35.0
 pydantic==2.11.7
 pydantic-settings==2.10.1
-langgraph==0.5.4
-langchain-openai==0.3.28
-langchain-core==0.3.72
+langgraph==1.2.20
+langchain-openai==1.7.4
+langchain-core==1.7.6
 playwright==1.54.0
 python-dotenv==1.2.2
-mcp==1.19.0
-langchain-mcp-adapters==0.1.9
+mcp==1.30.0
+langchain-mcp-adapters==0.3.2
