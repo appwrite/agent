@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright/python:v1.54.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.65.2-jammy@sha256:7e9810288d8bc47548fa6f73da3734396788e55caa84c9f6b415b56e06018827
 
 ARG AGENT_BUILD_ID=dev
 ARG AGENT_BUILD_TIME=unknown
